@@ -94,7 +94,7 @@ def codex_live(name, claude_dir, codex_dir):
             process.stdin.write((json.dumps(payload) + "\n").encode())
 
         send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "clientInfo": {"name": "usagi", "title": "Usagi", "version": "1.0.1"},
+            "clientInfo": {"name": "usagi", "title": "Usagi", "version": "1.0.2"},
             "capabilities": {}}})
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline and not {2, 3}.issubset(responses):
@@ -324,7 +324,7 @@ def codex_login_worker(executable, env):
                 raise RuntimeError("The Codex sign-in process exited") from None
 
         send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "clientInfo": {"name": "usagi", "title": "Usagi", "version": "1.0.1"},
+            "clientInfo": {"name": "usagi", "title": "Usagi", "version": "1.0.2"},
             "capabilities": {}}})
         deadline = time.monotonic() + LOGIN_TIMEOUT
         while time.monotonic() < deadline:
