@@ -64,7 +64,14 @@ private final class UsageController: NSViewController, WKScriptMessageHandler, W
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        sendProviderIcons()
         perform(["snapshot"])
+    }
+
+    func sendProviderIcons() {
+        guard let json = try? JSONSerialization.data(withJSONObject: ProviderIcons.dataURLs()) else { return }
+        webView.evaluateJavaScript("window.setProviderIcons(\(String(decoding: json, as: UTF8.self)))",
+                                   completionHandler: nil)
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -196,6 +203,57 @@ private let menuBarIcon: NSImage = {
     return image
 }()
 
+private enum ProviderIcons {
+    static let apps = ["claude": ["com.anthropic.claudefordesktop"], "codex": ["com.openai.codex", "com.openai.chat"]]
+    static let web = ["claude": URL(string: "https://claude.ai/apple-touch-icon.png")!]
+    static let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/usagi/icons")
+
+    static func found(_ provider: String) -> NSImage? {
+        for id in apps[provider] ?? [] {
+            if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+                return tile(NSWorkspace.shared.icon(forFile: app.path), margin: 100.0 / 824)
+            }
+        }
+        return NSImage(contentsOf: cache.appendingPathComponent(provider + ".png")).map { tile($0, margin: 0) }
+    }
+
+    static func image(_ provider: String) -> NSImage? {
+        found(provider) ?? Bundle.main.url(forResource: provider, withExtension: "png", subdirectory: "assets")
+            .flatMap(NSImage.init(contentsOf:))
+    }
+
+    static func dataURLs() -> [String: String] {
+        var urls: [String: String] = [:]
+        for provider in apps.keys {
+            guard let tiff = found(provider)?.tiffRepresentation,
+                  let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { continue }
+            urls[provider] = "data:image/png;base64," + png.base64EncodedString()
+        }
+        return urls
+    }
+
+    static func fetchMissing(then done: @escaping () -> Void) {
+        for (provider, url) in web where found(provider) == nil {
+            URLSession.shared.dataTask(with: url) { data, response, _ in
+                guard (response as? HTTPURLResponse)?.statusCode == 200, let data, data.count < 1_000_000,
+                      NSImage(data: data) != nil else { return }
+                try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+                guard (try? data.write(to: cache.appendingPathComponent(provider + ".png"), options: .atomic)) != nil
+                else { return }
+                DispatchQueue.main.async(execute: done)
+            }.resume()
+        }
+    }
+
+    private static func tile(_ icon: NSImage, margin: CGFloat) -> NSImage {
+        NSImage(size: NSSize(width: 128, height: 128), flipped: false) { rect in
+            NSBezierPath(roundedRect: rect, xRadius: 29, yRadius: 29).addClip()
+            icon.draw(in: rect.insetBy(dx: -rect.width * margin, dy: -rect.height * margin))
+            return true
+        }
+    }
+}
+
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
@@ -219,6 +277,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         popover.behavior = .transient
         popover.animates = true
+        ProviderIcons.fetchMissing { [weak self] in
+            self?.controller.sendProviderIcons()
+            self?.controller.perform(["snapshot"])
+        }
     }
 
     @objc private func togglePopover() {
@@ -256,9 +318,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let label = NSMutableAttributedString(string: "")
         for (index, part) in parts.enumerated() {
             if index > 0 { label.append(NSAttributedString(string: "   ")) }
-            let asset = part.0 == "codex" ? "codex" : "claude"
-            if let url = Bundle.main.url(forResource: asset, withExtension: "png", subdirectory: "assets"),
-               let icon = NSImage(contentsOf: url) {
+            if let icon = ProviderIcons.image(part.0) {
                 icon.size = NSSize(width: 13, height: 13)
                 let attachment = NSTextAttachment()
                 attachment.image = icon

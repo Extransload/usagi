@@ -55,7 +55,8 @@ Usagi looks for the CLIs in `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/l
 - **Claude**: the usage cache Claude Code keeps in `~/.claude.json` (`~/.claude-<name>/.claude.json` for extra accounts). Only percentages and reset times are read. Right after you use Claude the numbers can lag.
 - **Codex**: Usagi asks the Codex CLI's official app-server (`codex app-server`) for the account and its limits. Limits are named by the period Codex reports (Team: 5-hour and weekly, Free: 30-day, and so on).
 - Usagi never reads or copies sign-in tokens. Sign-in uses `claude auth login` and the Codex app-server's own sign-in.
-- Usagi stores only the card list (`~/.config/usagi/cards.json`), in-progress sign-in markers and the name of the selected account.
+- **Icons**: card and menu bar icons come from the Claude and ChatGPT apps when they are installed. If the Claude app isn't installed, Usagi downloads Claude's icon once from claude.ai and keeps it in `~/.config/usagi/icons`; apart from the CLIs it runs, this is the only network request Usagi makes. Without either, Usagi shows plain C and X badges.
+- Usagi stores only the card list (`~/.config/usagi/cards.json`), in-progress sign-in markers, the name of the selected account and that icon.
 - With the same account, the Claude apps, claude.ai and Claude Code share limits. Codex limits can also be shared with other Codex use on the same ChatGPT account.
 
 Usagi uses the same profile layout as [Agent Kit](#agent-kit-users) and shares its state folder when Agent Kit is installed.
@@ -81,6 +82,7 @@ Checked:
 - Finding the CLIs and reading usage with the short `PATH` an app opened from Finder gets
 - A Mac without Agent Kit, simulated with an empty home folder: clean start, adding a profile, selecting an account, and `usagi.zsh` switching `CODEX_HOME`
 - Installing with `brew install --cask` and opening the app without a Gatekeeper block
+- The Codex icon taken from the installed ChatGPT app, and the Claude icon downloaded from claude.ai (the test Mac has no Claude app)
 - 29 automated tests
 
 Not checked:
@@ -89,6 +91,7 @@ Not checked:
 - Running on macOS 14, 15 or 26
 - Sign-in on a Mac without Chrome (the default-browser fallback is covered by automated tests only)
 - Account selection (✓) in daily use on any Mac other than the developer's
+- Taking the Claude icon from an installed Claude desktop app
 
 Please report problems in [Issues](https://github.com/Extransload/usagi/issues).
 
