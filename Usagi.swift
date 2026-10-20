@@ -6,7 +6,7 @@ private final class Bridge {
     static func run(_ arguments: [String]) throws -> Data {
         guard let script = Bundle.main.url(forResource: "bridge", withExtension: "py") else {
             throw NSError(domain: "Usagi", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "사용량 리더를 찾지 못했습니다."])
+                          userInfo: [NSLocalizedDescriptionKey: "Usage reader not found."])
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
@@ -20,7 +20,7 @@ private final class Bridge {
         if process.terminationStatus != 0 {
             let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: String]
             throw NSError(domain: "Usagi", code: Int(process.terminationStatus),
-                          userInfo: [NSLocalizedDescriptionKey: parsed?["error"] ?? "명령 실행에 실패했습니다."])
+                          userInfo: [NSLocalizedDescriptionKey: parsed?["error"] ?? "Command failed."])
         }
         return data
     }
@@ -205,7 +205,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = menuBarIcon
-        statusItem.button?.toolTip = "사용량과 계정"
+        statusItem.button?.toolTip = "Usage and accounts"
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
         controller = UsageController()

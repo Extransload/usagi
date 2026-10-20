@@ -205,11 +205,11 @@ def snapshot():
                     readers.read_claude_cached(profile_file),
                     readers.read_claude(readers.claude_cache_for(name)))
                 info = accounts.account_info(name)
-                source = "Claude Code 로컬 캐시"
+                source = "Claude Code local cache"
             elif logged_in:
                 info = codex_live(name, claude_dir, codex_dir)
                 windows = info["windows"]
-                source = "Codex 계정 한도 · 공식 app-server" if windows else None
+                source = "Codex account limits · official app-server" if windows else None
             connecting = not logged_in and is_connecting(provider, name)
             entries.append({"id": name, "email": info.get("email"),
                             "plan": info.get("plan"),
@@ -223,7 +223,7 @@ def snapshot():
 
 def add_card(provider, name):
     if provider not in accounts.PROVIDERS:
-        raise accounts.AccountError("알 수 없는 공급자")
+        raise accounts.AccountError("Unknown provider")
     if name not in accounts.profiles(provider):
         accounts.add(name, provider)
     cards = visible_cards()
@@ -235,7 +235,7 @@ def add_card(provider, name):
 
 def add_next_card(provider):
     if provider not in accounts.PROVIDERS:
-        raise accounts.AccountError("알 수 없는 공급자")
+        raise accounts.AccountError("Unknown provider")
     shown = {card["id"] for card in visible_cards() if card["provider"] == provider}
     name = next((candidate for candidate in accounts.profiles(provider) if candidate not in shown), None)
     if name is None:
@@ -252,13 +252,13 @@ def remove_card(provider, name):
     cards = visible_cards()
     card = {"provider": provider, "id": name}
     if card not in cards:
-        raise accounts.AccountError("목록에 없는 계정입니다")
+        raise accounts.AccountError("That account is not in the list")
     save_cards([item for item in cards if item != card])
 
 
 def validate_login(provider, name):
     if provider not in accounts.PROVIDERS or name not in accounts.profiles(provider):
-        raise accounts.AccountError("알 수 없는 공급자 또는 계정")
+        raise accounts.AccountError("Unknown provider or account")
 
 
 def login_file(provider, name):
@@ -294,12 +294,12 @@ def is_connecting(provider, name):
 def open_browser(url):
     parsed = urlsplit(url)
     if parsed.scheme != "https" or not parsed.hostname:
-        raise ValueError("인증 주소가 올바르지 않습니다")
+        raise ValueError("Invalid sign-in URL")
     quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
     if not subprocess.run(["/usr/bin/open", "-a", "Google Chrome", url], **quiet).returncode:
         subprocess.run(["/usr/bin/osascript", "-e", 'tell application "Google Chrome" to activate'], **quiet)
     elif subprocess.run(["/usr/bin/open", url], **quiet).returncode:
-        raise RuntimeError("브라우저에서 인증 창을 열지 못했습니다")
+        raise RuntimeError("Could not open the sign-in page in a browser")
 
 
 def login_ready():
@@ -318,7 +318,7 @@ def codex_login_worker(executable, env):
             try:
                 process.stdin.write((json.dumps(payload) + "\n").encode())
             except BrokenPipeError:
-                raise RuntimeError("Codex 로그인 프로세스가 종료됐습니다") from None
+                raise RuntimeError("The Codex sign-in process exited") from None
 
         send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "clientInfo": {"name": "usagi", "title": "Usagi", "version": "1.0.0"},
@@ -327,22 +327,22 @@ def codex_login_worker(executable, env):
         while time.monotonic() < deadline:
             if not selector.select(min(1, max(0, deadline - time.monotonic()))):
                 if process.poll() is not None:
-                    raise RuntimeError("Codex 로그인 프로세스가 종료됐습니다")
+                    raise RuntimeError("The Codex sign-in process exited")
                 continue
             line = process.stdout.readline()
             if not line:
-                raise RuntimeError("Codex 로그인 프로세스가 종료됐습니다")
+                raise RuntimeError("The Codex sign-in process exited")
             message = json.loads(line)
             if message.get("method") == "account/login/completed":
                 params = message.get("params") or {}
                 if not params.get("success"):
-                    raise RuntimeError(params.get("error") or "Codex 로그인에 실패했습니다")
+                    raise RuntimeError(params.get("error") or "Codex sign-in failed")
                 return
             if "method" in message:
                 continue
             if message.get("id") == 1:
                 if "result" not in message:
-                    raise RuntimeError("Codex app-server를 시작하지 못했습니다")
+                    raise RuntimeError("Could not start the Codex app-server")
                 send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
                 send({"jsonrpc": "2.0", "id": 2, "method": "account/login/start",
                       "params": {"type": "chatgpt"}})
@@ -350,10 +350,10 @@ def codex_login_worker(executable, env):
                 response = message.get("result") or {}
                 if response.get("type") != "chatgpt" or not response.get("authUrl"):
                     raise RuntimeError((message.get("error") or {}).get("message")
-                                       or "Codex 인증 주소를 받지 못했습니다")
+                                       or "Codex did not return a sign-in URL")
                 open_browser(response["authUrl"])
                 login_ready()
-        raise RuntimeError("로그인 대기 시간이 지났습니다. 다시 시도해 주세요")
+        raise RuntimeError("Sign-in timed out. Try again.")
     finally:
         selector.close()
         if process.poll() is None:
@@ -381,7 +381,7 @@ def claude_login_worker(executable, env):
             while time.monotonic() < deadline:
                 browser_status = marker.read_text() if marker.exists() else None
                 if browser_status == "error":
-                    raise RuntimeError("브라우저에서 인증 창을 열지 못했습니다")
+                    raise RuntimeError("Could not open the sign-in page in a browser")
                 if browser_status == "opened" and not opened:
                     login_ready()
                     opened = True
@@ -392,7 +392,7 @@ def claude_login_worker(executable, env):
                 if not process.stdout.readline():
                     break
             if not opened:
-                raise RuntimeError("Claude 인증 창을 열지 못했습니다")
+                raise RuntimeError("Could not open the Claude sign-in page")
         finally:
             selector.close()
             if process.poll() is None:
@@ -431,14 +431,14 @@ def login(provider, name):
     try:
         selector.register(worker.stdout, selectors.EVENT_READ)
         if not selector.select(15):
-            raise RuntimeError("인증 창을 여는 시간이 초과됐습니다")
+            raise RuntimeError("Timed out opening the sign-in page")
         line = worker.stdout.readline()
         response = json.loads(line) if line else {}
         if response.get("ready") is not True:
-            raise RuntimeError(response.get("error") or "인증 창을 열지 못했습니다")
+            raise RuntimeError(response.get("error") or "Could not open the sign-in page")
         ready = True
     except (OSError, ValueError) as exc:
-        raise RuntimeError("인증 창을 열지 못했습니다") from exc
+        raise RuntimeError("Could not open the sign-in page") from exc
     finally:
         selector.close()
         worker.stdout.close()
@@ -495,7 +495,7 @@ def main(argv):
         remove_card(argv[1], argv[2])
         print(json.dumps(snapshot(), ensure_ascii=False))
     else:
-        raise ValueError("잘못된 명령")
+        raise ValueError("Invalid command")
 
 
 if __name__ == "__main__":

@@ -51,14 +51,14 @@ class SignInTests(unittest.TestCase):
 
     def test_sign_in_failure_is_not_reported_as_success(self):
         worker = mock.Mock()
-        worker.stdout = io.StringIO('{"error": "인증 창을 열지 못했습니다"}\n')
+        worker.stdout = io.StringIO('{"error": "Could not open the sign-in page"}\n')
         worker.poll.return_value = 1
         with mock.patch.object(bridge.accounts, "profiles", return_value=["default"]), \
              mock.patch.object(bridge, "is_connecting", return_value=False), \
              mock.patch.object(bridge.subprocess, "Popen", return_value=worker), \
              mock.patch.object(bridge.selectors, "DefaultSelector") as selector:
             selector.return_value.select.return_value = [(None, None)]
-            with self.assertRaisesRegex(RuntimeError, "인증 창을 열지 못했습니다"):
+            with self.assertRaisesRegex(RuntimeError, "Could not open the sign-in page"):
                 bridge.login("claude", "default")
 
     def test_retry_stops_existing_login_before_opening_new_one(self):
@@ -219,7 +219,7 @@ class LoginResultTests(unittest.TestCase):
     def test_codex_login_timeout_is_recorded_for_the_card(self):
         with tempfile.TemporaryDirectory() as folder:
             message, recorded = self.run_codex_worker(folder, "hang")
-        self.assertIn("시간", message)
+        self.assertIn("timed out", message)
         self.assertEqual(recorded, message)
 
     def test_new_login_clears_previous_failure(self):
@@ -233,7 +233,7 @@ class LoginResultTests(unittest.TestCase):
              mock.patch.object(bridge.subprocess, "Popen", return_value=worker), \
              mock.patch.object(bridge.selectors, "DefaultSelector") as selector:
             selector.return_value.select.return_value = [(None, None)]
-            bridge.login_error_file("codex", "work").write_text("이전 실패")
+            bridge.login_error_file("codex", "work").write_text("previous failure")
             bridge.login("codex", "work")
             self.assertIsNone(bridge.login_error("codex", "work"))
 

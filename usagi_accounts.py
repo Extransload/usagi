@@ -35,12 +35,12 @@ def dirs(name):
 
 def check_name(name):
     if name == "default" or not NAME.match(name or ""):
-        raise AccountError("이름은 소문자·숫자·- 만, default 는 쓸 수 없습니다: %r" % name)
+        raise AccountError("Use lowercase letters, digits and -; 'default' is reserved: %r" % name)
 
 
 def check_provider(provider):
     if provider is not None and provider not in PROVIDERS:
-        raise AccountError("알 수 없는 공급자: %s" % provider)
+        raise AccountError("Unknown provider: %s" % provider)
 
 
 def is_profile(folder):
@@ -80,7 +80,7 @@ def _write_active(path, name):
 def use(name, provider=None):
     check_provider(provider)
     if name not in profiles(provider):
-        raise AccountError("없는 계정입니다: %s" % name)
+        raise AccountError("No such account: %s" % name)
     if provider is None:
         _write_active(STATE / "account", name)
         for source in PROVIDERS:
