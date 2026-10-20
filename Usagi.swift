@@ -65,7 +65,24 @@ private final class UsageController: NSViewController, WKScriptMessageHandler, W
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         sendProviderIcons()
+        if let update { sendUpdate(update) }
         perform(["snapshot"])
+    }
+
+    private var update: [String: String]?
+
+    func sendUpdate(_ info: [String: String]) {
+        update = info
+        guard let json = try? JSONSerialization.data(withJSONObject: info) else { return }
+        webView.evaluateJavaScript("window.setUpdate(\(String(decoding: json, as: UTF8.self)))", completionHandler: nil)
+    }
+
+    private func finishUpdate(_ result: Data) {
+        if let object = (try? JSONSerialization.jsonObject(with: result)) as? [String: Any],
+           let link = object["release_url"] as? String, let url = URL(string: link) {
+            NSWorkspace.shared.open(url)
+        }
+        send("window.receiveUpdateResult", data: result)
     }
 
     func sendProviderIcons() {
@@ -93,6 +110,7 @@ private final class UsageController: NSViewController, WKScriptMessageHandler, W
         case "add_auto":
             guard let provider = body["provider"], ["claude", "codex"].contains(provider) else { return }
             perform(["add_auto", provider])
+        case "update": perform(["update"])
         case "quit": NSApplication.shared.terminate(nil)
         default: break
         }
@@ -116,7 +134,10 @@ private final class UsageController: NSViewController, WKScriptMessageHandler, W
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
                 let result = try Bridge.run(arguments)
-                let data = arguments.first == "login" ? try Bridge.run(["snapshot"]) : result
+                if arguments.first == "update" {
+                    DispatchQueue.main.async { self?.finishUpdate(result) }
+                }
+                let data = ["login", "update"].contains(arguments.first) ? try Bridge.run(["snapshot"]) : result
                 DispatchQueue.main.async {
                     self?.loading = false
                     self?.onSnapshot?(data)
@@ -203,6 +224,34 @@ private let menuBarIcon: NSImage = {
     return image
 }()
 
+private enum Updates {
+    static let latest = URL(string: "https://api.github.com/repos/Extransload/usagi/releases/latest")!
+    static let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+
+    static func check(then done: @escaping ([String: String]?) -> Void) {
+        var request = URLRequest(url: latest)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            guard (response as? HTTPURLResponse)?.statusCode == 200, let data,
+                  let release = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let tag = release["tag_name"] as? String else { return }
+            let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+            let info = newer(version, than: current) ? ["version": version, "current": current] : nil
+            DispatchQueue.main.async { done(info) }
+        }.resume()
+    }
+
+    static func newer(_ version: String, than other: String) -> Bool {
+        let left = version.split(separator: ".").map { Int($0) ?? 0 }
+        let right = other.split(separator: ".").map { Int($0) ?? 0 }
+        for index in 0..<max(left.count, right.count) {
+            let a = index < left.count ? left[index] : 0, b = index < right.count ? right[index] : 0
+            if a != b { return a > b }
+        }
+        return false
+    }
+}
+
 private enum ProviderIcons {
     static let apps = ["claude": ["com.anthropic.claudefordesktop"], "codex": ["com.openai.codex", "com.openai.chat"]]
     static let web = ["claude": URL(string: "https://claude.ai/apple-touch-icon.png")!]
@@ -281,6 +330,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.sendProviderIcons()
             self?.controller.perform(["snapshot"])
         }
+        checkForUpdate()
+    }
+
+    private var lastUpdateCheck: Date?
+
+    private func checkForUpdate() {
+        if let last = lastUpdateCheck, Date().timeIntervalSince(last) < 6 * 3600 { return }
+        Updates.check { [weak self] info in
+            self?.lastUpdateCheck = Date()
+            if let info { self?.controller.sendUpdate(info) }
+        }
     }
 
     @objc private func togglePopover() {
@@ -290,6 +350,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
+            checkForUpdate()
         }
     }
 

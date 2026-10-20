@@ -23,6 +23,9 @@ CARD_FILE = CONFIG_DIR / "cards.json"
 LOGIN_DIR = CONFIG_DIR / "logins"
 LOGIN_TIMEOUT = 600
 CLI_FOLDERS = ("/opt/homebrew/bin", "/usr/local/bin")
+BREW_PREFIXES = ("/opt/homebrew", "/usr/local")
+RELEASES_URL = "https://github.com/Extransload/usagi/releases/latest"
+APP_PATH = Path(__file__).resolve().parents[2]  # Usagi.app/Contents/Resources/bridge.py
 
 
 def find_cli(name):
@@ -472,6 +475,22 @@ def login_worker(provider, name):
             pass
 
 
+def update():
+    """Homebrew installs upgrade in the background and reopen; Usagi quits while the cask is replaced."""
+    for prefix in map(Path, BREW_PREFIXES):
+        brew = prefix / "bin/brew"
+        if (prefix / "Caskroom/usagi").is_dir() and os.access(brew, os.X_OK):
+            break
+    else:
+        return {"release_url": RELEASES_URL}
+    CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with open(CONFIG_DIR / "update.log", "a") as log:
+        subprocess.Popen(["/bin/zsh", "-c", '"$0" update; "$0" upgrade --cask usagi; /usr/bin/open "$1"',
+                          str(brew), str(APP_PATH)], stdin=subprocess.DEVNULL, stdout=log,
+                         stderr=subprocess.STDOUT, start_new_session=True)
+    return {"updating": True}
+
+
 def main(argv):
     migrate_legacy_config()
     action = argv[0] if argv else "snapshot"
@@ -494,6 +513,8 @@ def main(argv):
     elif action == "remove" and len(argv) == 3:
         remove_card(argv[1], argv[2])
         print(json.dumps(snapshot(), ensure_ascii=False))
+    elif action == "update" and len(argv) == 1:
+        print(json.dumps(update()))
     else:
         raise ValueError("Invalid command")
 

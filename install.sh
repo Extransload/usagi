@@ -35,5 +35,5 @@ if [[ "$(/usr/bin/defaults read "$legacy/Contents/Info" CFBundleIdentifier 2>/de
 fi
 /bin/launchctl bootout "gui/$uid" "$plist" 2>/dev/null || true
 /bin/launchctl bootstrap "gui/$uid" "$plist"
-/usr/bin/open "$installed"
+/usr/bin/open "$installed" 2>/dev/null || true  # the LaunchAgent may already be opening it
 echo "$installed"

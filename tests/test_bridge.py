@@ -275,6 +275,36 @@ class CodexWindowTests(unittest.TestCase):
         self.assertEqual(free["30d"]["resets_at"], 3)
 
 
+class UpdateTests(unittest.TestCase):
+    def test_homebrew_install_upgrades_in_the_background_and_relaunches(self):
+        with tempfile.TemporaryDirectory() as folder:
+            prefix = Path(folder)
+            (prefix / "Caskroom/usagi").mkdir(parents=True)
+            (prefix / "bin").mkdir()
+            (prefix / "bin/brew").write_text("")
+            (prefix / "bin/brew").chmod(0o755)
+            with mock.patch.object(bridge, "BREW_PREFIXES", (str(prefix),)), \
+                 mock.patch.object(bridge, "CONFIG_DIR", prefix / "config"), \
+                 mock.patch.object(bridge.subprocess, "Popen") as launch:
+                result = bridge.update()
+        self.assertEqual(result, {"updating": True})
+        command = launch.call_args.args[0]
+        self.assertEqual(command[:2], ["/bin/zsh", "-c"])
+        self.assertIn("upgrade --cask usagi", command[2])
+        self.assertIn('open "$1"', command[2])
+        self.assertEqual(command[3:], [str(prefix / "bin/brew"), str(bridge.APP_PATH)])
+        self.assertEqual(bridge.APP_PATH, Path(bridge.__file__).resolve().parents[2])
+        self.assertTrue(launch.call_args.kwargs["start_new_session"])
+
+    def test_other_installs_get_the_release_page(self):
+        with tempfile.TemporaryDirectory() as folder, \
+             mock.patch.object(bridge, "BREW_PREFIXES", (folder,)), \
+             mock.patch.object(bridge.subprocess, "Popen") as launch:
+            result = bridge.update()
+        self.assertEqual(result, {"release_url": "https://github.com/Extransload/usagi/releases/latest"})
+        launch.assert_not_called()
+
+
 class CliLookupTests(unittest.TestCase):
     def test_cli_is_found_outside_a_finder_launch_path(self):
         with tempfile.TemporaryDirectory() as folder:

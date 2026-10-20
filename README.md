@@ -17,7 +17,9 @@ open -a Usagi
 - To start Usagi when you log in, add it under **System Settings > General > Login Items**.
 - Usagi is not signed or notarized by Apple. So that it opens right away, the Homebrew install removes the macOS quarantine flag. That skips Apple's check, so install it only if you trust this repository.
 
-Update and uninstall:
+When you open the menu, Usagi checks GitHub for a newer release (at most every 6 hours) and asks whether to update. With a Homebrew install, **Update** runs `brew update` and `brew upgrade --cask usagi` in the background and reopens Usagi; the output goes to `~/.config/usagi/update.log`, and if the update hasn't finished after 5 minutes the menu says so and offers to retry. Other installs open the release page instead. To be notified by email, use **Watch > Custom > Releases** on the GitHub repository.
+
+Update and uninstall by hand:
 
 ```sh
 brew upgrade --cask usagi
@@ -55,7 +57,7 @@ Usagi looks for the CLIs in `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/l
 - **Claude**: the usage cache Claude Code keeps in `~/.claude.json` (`~/.claude-<name>/.claude.json` for extra accounts). Only percentages and reset times are read. Right after you use Claude the numbers can lag.
 - **Codex**: Usagi asks the Codex CLI's official app-server (`codex app-server`) for the account and its limits. Limits are named by the period Codex reports (Team: 5-hour and weekly, Free: 30-day, and so on).
 - Usagi never reads or copies sign-in tokens. Sign-in uses `claude auth login` and the Codex app-server's own sign-in.
-- **Icons**: card and menu bar icons come from the Claude and ChatGPT apps when they are installed. If the Claude app isn't installed, Usagi downloads Claude's icon once from claude.ai and keeps it in `~/.config/usagi/icons`; apart from the CLIs it runs, this is the only network request Usagi makes. Without either, Usagi shows plain C and X badges.
+- **Icons**: card and menu bar icons come from the Claude and ChatGPT apps when they are installed. If the Claude app isn't installed, Usagi downloads Claude's icon once from claude.ai and keeps it in `~/.config/usagi/icons`; apart from the CLIs it runs and the update check (`api.github.com`), this is the only network request Usagi makes. Without either, Usagi shows plain C and X badges.
 - Usagi stores only the card list (`~/.config/usagi/cards.json`), in-progress sign-in markers, the name of the selected account and that icon.
 - With the same account, the Claude apps, claude.ai and Claude Code share limits. Codex limits can also be shared with other Codex use on the same ChatGPT account.
 
@@ -116,6 +118,8 @@ This installs `~/Applications/Usagi.app` and registers a LaunchAgent so it start
 python3 -m unittest discover -s tests
 ./make-icon.sh                              # only after editing the SVGs in assets; needs Google Chrome
 ```
+
+To publish a version, commit your changes and run `./release.sh 1.2.3` (optionally with a notes file as the second argument). Run it from `main`. It runs the tests, bumps the version, tags and pushes, builds the zip from a clean clone of the tag, uploads a draft release, updates the cask in [Extransload/homebrew-tap](https://github.com/Extransload/homebrew-tap) and then publishes the release, so the in-app update check never offers a version Homebrew can't install yet. It needs the GitHub CLI (`gh`) signed in with push access.
 
 ## License
 

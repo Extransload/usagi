@@ -4,12 +4,12 @@
 :root { color-scheme:light;
   --ink:#202124;--muted:#62656b;--dim:#777b82;--line:rgba(70,74,82,.16);
   --card:rgba(255,255,255,.48);--control:rgba(255,255,255,.38);--control-strong:rgba(255,255,255,.72);
-  --shadow:rgba(23,27,37,.08);--blue:#3278de;--peach:#d97853;--amber:#b98123;--red:#c94f62;
+  --shadow:rgba(23,27,37,.08);--on-blue:#fff;--blue:#3278de;--peach:#d97853;--amber:#b98123;--red:#c94f62;
 }
 @media(prefers-color-scheme:dark){:root{color-scheme:dark;
   --ink:#f5f5f7;--muted:#c1c3ca;--dim:#a4a6af;--line:rgba(255,255,255,.19);
   --card:rgba(255,255,255,.105);--control:rgba(255,255,255,.09);--control-strong:rgba(255,255,255,.17);
-  --shadow:rgba(0,0,0,.14);--blue:#82b8ff;--peach:#f5a47e;--amber:#f4cc78;--red:#ff8fa4;
+  --shadow:rgba(0,0,0,.14);--on-blue:#10213d;--blue:#82b8ff;--peach:#f5a47e;--amber:#f4cc78;--red:#ff8fa4;
 }}
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}
 body{background:transparent;color:var(--ink);font:12px/1.3 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif}
@@ -35,6 +35,7 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 .empty{color:var(--dim);font-size:10px}.status-dot{width:6px;height:6px;border-radius:50%;background:var(--dim)}.status-dot.online{background:#46ad77}.account-strip{border-top:1px solid var(--line);padding-top:6px;margin-top:3px;display:flex;align-items:center;justify-content:flex-end}
 .account-actions{display:flex;gap:5px;align-items:center}.action-icon{width:28px;height:26px;display:grid;place-items:center;border:1px solid var(--line);border-radius:8px;background:var(--control);color:var(--muted);padding:0}.action-icon svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.action-icon.active{color:#46ad77}.action-icon.signin{color:var(--blue)}.claude .action-icon.signin{color:var(--peach)}.action-icon.danger{color:var(--red)}
 .footer{display:flex;flex:none;gap:8px;align-items:center;padding:3px 3px 0;color:var(--muted);font-size:10px}.footer .icon-button{border:1px solid var(--line);background:var(--control);color:var(--ink);padding:0}.footer .spacer{flex:1}
+.update{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:9px 10px;border:1px solid var(--blue);border-radius:12px;background:var(--card);font-size:11px;backdrop-filter:blur(20px)}.update[hidden]{display:none}.update .text{flex:1;min-width:0;display:grid;gap:2px}.update .text span{color:var(--muted);font-size:10px}.update button{flex:none;border-radius:8px;padding:5px 9px;border:1px solid var(--line);background:var(--control);color:var(--ink);font-size:11px}.update .now{background:var(--blue);border-color:var(--blue);color:var(--on-blue);font-weight:650}.update .spinner{flex:none;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
 .error{background:var(--control-strong);color:var(--red);border-radius:8px;padding:6px 8px;margin:6px 0;font-size:10px}
 .overlay{position:fixed;inset:0;background:rgba(17,17,27,.57);display:none;align-items:center;justify-content:center;padding:22px}.overlay.show{display:flex}
 .dialog{background:var(--control-strong);border:1px solid var(--line);border-radius:15px;width:100%;padding:18px;box-shadow:0 20px 50px rgba(17,17,27,.25);backdrop-filter:blur(30px)}
@@ -45,6 +46,7 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 </style></head><body>
 <div class="shell">
   <div class="mast"><h1>Usage</h1><div class="spacer"></div><button class="icon-button" onclick="send('snapshot')" title="Refresh" aria-label="Refresh">↻</button></div>
+  <div id="update" class="update" hidden></div>
   <div id="cards"><div class="card">Loading…</div></div><div id="error"></div>
   <div class="footer"><button class="icon-button" onclick="showAdd()" title="Add account" aria-label="Add account">＋</button><span class="spacer"></span><button class="icon-button" onclick="send('quit')" title="Quit" aria-label="Quit">⏻</button></div>
 </div>
@@ -89,7 +91,15 @@ function carousel(group,motion){const {source,active,accounts}=group;const index
 function render(moved,step){if(!lastData)return;document.getElementById('cards').innerHTML=groups(lastData).map(g=>carousel(g,g.source===moved?(step<0?'from-left':'from-right'):'')).join('');requestSize()}
 function rotate(source,step){const group=lastData&&groups(lastData).find(g=>g.source===source);if(!group||group.accounts.length<2)return;const index=Math.max(0,group.accounts.findIndex(a=>a.id===carouselPos[source]));carouselPos[source]=group.accounts[(index+step+group.accounts.length)%group.accounts.length].id;render(source,step)}
 window.receiveSnapshot=function(encoded){try{lastData=JSON.parse(decode(encoded));render();const node=document.getElementById('error');node.className='';node.textContent='';hideAdd()}catch(error){document.getElementById('error').textContent=String(error)}};
-window.receiveError=function(encoded){const node=document.getElementById('error');node.className='error';node.textContent=decode(encoded);requestSize()};
+let updateInfo=null,updateHidden=false,updating=false,updateFailed=false,updateTimer=null;
+window.setUpdate=function(info){updateInfo=info;renderUpdate()};
+window.receiveUpdateResult=function(encoded){const result=JSON.parse(decode(encoded));if(!result.updating){updating=false;updateHidden=true;clearTimeout(updateTimer)}renderUpdate()};
+function renderUpdate(){const node=document.getElementById('update');node.hidden=!updateInfo||updateHidden;
+ if(!node.hidden)node.innerHTML=updating?`<span class="spinner"></span><div class="text"><b>Updating to ${escapeHtml(updateInfo.version)}…</b><span>Usagi will close and reopen.</span></div>`:updateFailed?`<div class="text"><b>The update didn't finish</b><span>Details are in ~/.config/usagi/update.log</span></div><button onclick="hideUpdate()">Later</button><button class="now" onclick="startUpdate()">Retry</button>`:`<div class="text"><b>Usagi ${escapeHtml(updateInfo.version)} is available</b><span>You have ${escapeHtml(updateInfo.current)}. Update now?</span></div><button onclick="hideUpdate()">Later</button><button class="now" onclick="startUpdate()">Update</button>`;
+ requestSize()}
+function hideUpdate(){updateHidden=true;renderUpdate()}
+function startUpdate(){updating=true;updateFailed=false;renderUpdate();send('update');clearTimeout(updateTimer);updateTimer=setTimeout(()=>{if(updating){updating=false;updateFailed=true;renderUpdate()}},300000)}
+window.receiveError=function(encoded){if(updating){updating=false;clearTimeout(updateTimer);renderUpdate()}const node=document.getElementById('error');node.className='error';node.textContent=decode(encoded);requestSize()};
 document.getElementById('cards').addEventListener('wheel',event=>{const box=event.target.closest('.carousel');if(!box||Math.abs(event.deltaX)<=Math.abs(event.deltaY))return;event.preventDefault();if(Date.now()<swipeLock)return;if(Date.now()-swipeAt>200)swipe=0;swipeAt=Date.now();swipe+=event.deltaX;if(Math.abs(swipe)>40){rotate(box.dataset.provider,swipe>0?1:-1);swipe=0;swipeLock=Date.now()+450}},{passive:false});
 function showAccountAction(provider,account){pendingAccountAction={provider,account};document.getElementById('action-title').textContent=`Remove ${sourceNames[provider]} · ${account}?`;document.getElementById('action-overlay').classList.add('show')}
 function hideAccountAction(){pendingAccountAction=null;document.getElementById('action-overlay').classList.remove('show')}
