@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#30324a"/>
+      <stop offset="1" stop-color="#17172a"/>
+    </linearGradient>
+    <filter id="drop" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity=".3"/>
+    </filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#night)" filter="url(#drop)"/>
+  <!-- Ears are gauges: left = Claude, right = Codex -->
+  <g transform="rotate(-8 430 560)">
+    <rect x="370" y="190" width="120" height="400" rx="60" fill="#f7f4ef"/>
+    <rect x="393" y="213" width="74" height="360" rx="37" fill="#ddd6cd"/>
+    <rect x="393" y="292" width="74" height="281" fill="#d97853"/>
+  </g>
+  <g transform="rotate(8 594 560)">
+    <rect x="534" y="190" width="120" height="400" rx="60" fill="#f7f4ef"/>
+    <rect x="557" y="213" width="74" height="360" rx="37" fill="#ddd6cd"/>
+    <rect x="557" y="367" width="74" height="206" fill="#3278de"/>
+  </g>
+  <ellipse cx="512" cy="664" rx="258" ry="212" fill="#f7f4ef"/>
+  <ellipse cx="392" cy="716" rx="36" ry="20" fill="#f2a49b" opacity=".5"/>
+  <ellipse cx="632" cy="716" rx="36" ry="20" fill="#f2a49b" opacity=".5"/>
+  <circle cx="436" cy="656" r="25" fill="#24243a"/>
+  <circle cx="588" cy="656" r="25" fill="#24243a"/>
+  <ellipse cx="512" cy="708" rx="21" ry="14" fill="#e58f97"/>
+  <rect x="102.5" y="102.5" width="819" height="819" rx="183" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="5"/>
+</svg>
