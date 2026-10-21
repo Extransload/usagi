@@ -21,7 +21,7 @@ Needs macOS 14 or later and the Claude Code or Codex CLI ([requirements](#requir
 
 ## Update and uninstall
 
-When you open the menu, Usagi checks GitHub for a newer release (at most every 6 hours) and asks whether to update. With a Homebrew install, **Update** runs `brew update` and `brew upgrade --cask extransload/tap/usagi` in the background and reopens Usagi. Only one update runs at a time; the output goes to `~/.config/usagi/update.log`, and if the update hasn't finished after 5 minutes the menu says so and offers to retry. A copy built from source opens the release page instead. To be notified by email, use **Watch > Custom > Releases** on the GitHub repository.
+When you open the menu, Usagi checks GitHub for a newer release (at most every 6 hours) and asks whether to update. With a Homebrew install, **Update** runs `brew update` and `brew upgrade --cask extransload/tap/usagi` in the background and reopens Usagi. Only one update runs at a time; the output goes to `~/.config/usagi/update.log`, and if the update hasn't finished after 11 minutes the menu says so and offers to retry. A copy built from source opens the release page instead. To be notified by email, use **Watch > Custom > Releases** on the GitHub repository.
 
 By hand:
 
@@ -59,7 +59,7 @@ Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the C
 
 - **Hide** (the crossed-out eye) only hides the card. The account stays signed in and keeps its profile folder; add it back with **＋**.
 - Each limit shows when its reading was taken (**Updated 4m ago**) and when the limit resets. A reading that may be out of date says so, and a limit that has reset since the last reading shows **Reset** until the CLI reports a new value.
-- Usagi refreshes every minute while the menu is open and every 5 minutes while it is closed, and pauses while the display sleeps. When the numbers in the menu bar are not up to date they are dimmed and marked `!`; hover over them to see why.
+- Usagi refreshes every minute while the menu is open and every 5 minutes while it is closed, and pauses while the display sleeps. When the numbers in the menu bar are not up to date they are dimmed; hover over them to see why. Only one copy of Usagi runs at a time.
 
 ## What Usagi reads
 
