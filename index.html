@@ -280,8 +280,12 @@ function syncChrome(){
   const add=$('add'),adding=[...busy.keys()].some(k=>k.endsWith(':add_auto'));
   if(add.getAttribute('aria-busy')!==String(adding)){add.innerHTML=adding?SPINNER:icon('plus');add.setAttribute('aria-busy',String(adding))}
 }
+// A classic (always shown) scrollbar sits inside #cards' right padding, so the cards keep lining up with the header.
+function fitGutter(){const cards=$('cards'),bar=cards.offsetWidth-cards.clientWidth;cards.style.paddingRight=bar?Math.max(0,13-bar)+'px':''}
+addEventListener('resize',fitGutter);
 function measure(force){
   const cards=$('cards');
+  fitGutter();
   const height=Math.ceil(document.querySelector('.footer').getBoundingClientRect().bottom+9+Math.max(0,cards.scrollHeight-cards.clientHeight));
   if(force||height!==sentHeight){sentHeight=height;send('resize',{height})}
 }
