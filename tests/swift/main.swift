@@ -316,22 +316,33 @@ check(asked.begin(now: checkedAt + 60, force: true), "the user can check now")
 check(!asked.begin(now: checkedAt + 61, force: true), "but not twice at once")
 
 // Also Use in Apps
-func pairs(_ list: [(String, String?)]) -> [String] { list.map { "\($0.0)=\($0.1 ?? "<unset>")" } }
+func pairs(_ list: [AppEnvironment.Change]) -> [String] { list.map { "\($0.name)=\($0.value ?? "<unset>")\($0.ours ? "" : " (undo)")" } }
+let me = "/Users/me", codex2 = "/Users/me/.codex-account-2"
 let envSnapshot: [String: Any] = ["providers": ["claude": ["active": "default"], "codex": ["active": "account-2"]]]
-let wanted = AppEnvironment.wanted(envSnapshot, home: "/Users/me")
+let wanted = AppEnvironment.wanted(envSnapshot, home: me)
 equal(wanted["CLAUDE_CONFIG_DIR"], .unset, "default is unset")
-equal(wanted["CODEX_HOME"], .folder("/Users/me/.codex-account-2"), "profile folder")
-equal(AppEnvironment.wanted(["providers": ["claude": ["active": "../x"]]], home: "/h")["CLAUDE_CONFIG_DIR"], .unset, "bad names ignored")
-equal(pairs(AppEnvironment.changes(wanted: wanted, current: [:], applied: [:])), ["CODEX_HOME=/Users/me/.codex-account-2"], "set the profile")
-equal(pairs(AppEnvironment.changes(wanted: wanted, current: ["CODEX_HOME": "/Users/me/.codex-account-2"], applied: [:])), [], "already set")
-equal(pairs(AppEnvironment.changes(wanted: wanted, current: ["CLAUDE_CONFIG_DIR": "/Users/me/.claude-a"], applied: ["CLAUDE_CONFIG_DIR": "/Users/me/.claude-a"])),
-      ["CLAUDE_CONFIG_DIR=<unset>", "CODEX_HOME=/Users/me/.codex-account-2"], "back to default undoes ours")
-equal(pairs(AppEnvironment.changes(wanted: wanted, current: ["CLAUDE_CONFIG_DIR": "/mine"], applied: [:])),
-      ["CODEX_HOME=/Users/me/.codex-account-2"], "a value Usagi didn't set stays")
-equal(pairs(AppEnvironment.changes(wanted: nil, current: ["CODEX_HOME": "/Users/me/.codex-account-2", "CLAUDE_CONFIG_DIR": "/mine"],
-                                   applied: ["CODEX_HOME": "/Users/me/.codex-account-2"])), ["CODEX_HOME=<unset>"], "turning it off undoes only ours")
-equal(pairs(AppEnvironment.changes(wanted: nil, current: ["CODEX_HOME": "/changed"], applied: ["CODEX_HOME": "/Users/me/.codex-account-2"])),
+equal(wanted["CODEX_HOME"], .value(codex2), "profile folder")
+equal(wanted["_USAGI_CODEX_ACCOUNT"], .value("account-2"), "usagi.zsh tracker")
+equal(wanted["_AGENTKIT_CODEX_ACCOUNT"], .value("account-2"), "Agent Kit tracker")
+equal(wanted["_AGENTKIT_CLAUDE_ACCOUNT"], .unset, "trackers unset for default")
+check(AppEnvironment.wanted(["providers": ["claude": ["active": "../x"]]], home: "/h").isEmpty, "bad names are left alone")
+check(AppEnvironment.wanted(["providers": [:]], home: "/h").isEmpty, "missing providers are left alone")
+let codexSet = ["CODEX_HOME=\(codex2)", "_USAGI_CODEX_ACCOUNT=account-2", "_AGENTKIT_CODEX_ACCOUNT=account-2"]
+equal(pairs(AppEnvironment.changes(wanted: wanted, current: [:], applied: [:], previous: [:])), codexSet, "set the profile and trackers")
+let codexNow = ["CODEX_HOME": codex2, "_USAGI_CODEX_ACCOUNT": "account-2", "_AGENTKIT_CODEX_ACCOUNT": "account-2"]
+equal(pairs(AppEnvironment.changes(wanted: wanted, current: codexNow, applied: codexNow, previous: [:])), [], "already set")
+equal(pairs(AppEnvironment.changes(wanted: wanted, current: codexNow.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-a"]) { $1 },
+                                   applied: codexNow.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-a"]) { $1 }, previous: [:])),
+      ["CLAUDE_CONFIG_DIR=<unset> (undo)"], "back to default undoes ours")
+equal(pairs(AppEnvironment.changes(wanted: wanted, current: codexNow.merging(["CLAUDE_CONFIG_DIR": "/mine"]) { $1 }, applied: codexNow, previous: [:])),
+      [], "default leaves a value Usagi didn't set")
+equal(pairs(AppEnvironment.changes(wanted: nil, current: codexNow, applied: codexNow, previous: ["CODEX_HOME": "/custom"])),
+      ["CODEX_HOME=/custom (undo)", "_USAGI_CODEX_ACCOUNT=<unset> (undo)", "_AGENTKIT_CODEX_ACCOUNT=<unset> (undo)"],
+      "turning it off restores what Usagi replaced")
+equal(pairs(AppEnvironment.changes(wanted: nil, current: ["CODEX_HOME": "/changed"], applied: ["CODEX_HOME": codex2], previous: [:])),
       [], "changed by someone else since")
+equal(pairs(AppEnvironment.changes(wanted: wanted, current: ["CODEX_HOME": "/custom"], applied: [:], previous: [:])).first,
+      "CODEX_HOME=\(codex2)", "a value someone else set is replaced (and remembered by the caller)")
 
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)

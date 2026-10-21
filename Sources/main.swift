@@ -37,36 +37,54 @@ enum LaunchEnvironment {
     static func current(_ names: [String]) -> [String: String] {
         var values: [String: String] = [:]
         for name in names {
-            let value = run(["getenv", name]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = run(["getenv", name]).output.trimmingCharacters(in: .whitespacesAndNewlines)
             if !value.isEmpty { values[name] = value }
         }
         return values
     }
 
-    /// Applies `wanted` (nil = the option is off) off the main thread and records what Usagi set.
-    static func sync(_ wanted: [String: AppEnvironment.Target]?) {
+    /// Applies `wanted` (nil = the option is off) off the main thread. What Usagi set, and any value it replaced,
+    /// is recorded before each launchctl call, so a quit halfway can't leave an unrecorded value behind.
+    /// `failed` runs (on the main thread) when a call fails, so the next snapshot tries again.
+    static func sync(_ wanted: [String: AppEnvironment.Target]?, failed: @escaping @MainActor @Sendable () -> Void) {
         queue.async {
             let defaults = UserDefaults.standard
             var applied = defaults.dictionary(forKey: AppEnvironment.appliedKey) as? [String: String] ?? [:]
-            let names = AppEnvironment.variables.map { $0.1 }
-            for (name, value) in AppEnvironment.changes(wanted: wanted, current: current(names), applied: applied) {
-                _ = run(value.map { ["setenv", name, $0] } ?? ["unsetenv", name])
-                applied[name] = value
+            var previous = defaults.dictionary(forKey: AppEnvironment.previousKey) as? [String: String] ?? [:]
+            let now = current(AppEnvironment.variables)
+            for (name, value) in applied where now[name] != value {  // changed since: no longer Usagi's
+                applied[name] = nil
+                previous[name] = nil
+            }
+            var ok = true
+            for change in AppEnvironment.changes(wanted: wanted, current: now, applied: applied, previous: previous) {
+                if change.ours {
+                    if let before = now[change.name], before != applied[change.name] { previous[change.name] = before }
+                    applied[change.name] = change.value
+                } else {
+                    applied[change.name] = nil
+                    previous[change.name] = nil
+                }
+                defaults.set(applied, forKey: AppEnvironment.appliedKey)
+                defaults.set(previous, forKey: AppEnvironment.previousKey)
+                ok = run(change.value.map { ["setenv", change.name, $0] } ?? ["unsetenv", change.name]).ok && ok
             }
             defaults.set(applied, forKey: AppEnvironment.appliedKey)
+            defaults.set(previous, forKey: AppEnvironment.previousKey)
+            if !ok { DispatchQueue.main.async { MainActor.assumeIsolated { failed() } } }
         }
     }
 
-    @discardableResult private static func run(_ arguments: [String]) -> String {
+    private static func run(_ arguments: [String]) -> (ok: Bool, output: String) {
         let process = Process(), output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         process.arguments = arguments
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return "" }
+        guard (try? process.run()) != nil else { return (false, "") }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return String(decoding: data, as: UTF8.self)
+        return (process.terminationStatus == 0, String(decoding: data, as: UTF8.self))
     }
 }
 
@@ -223,7 +241,7 @@ enum LaunchEnvironment {
         if alsoUseInApps && wanted == nil { return }  // no snapshot yet
         if let synced = syncedEnvironment, synced == wanted { return }
         syncedEnvironment = .some(wanted)
-        LaunchEnvironment.sync(wanted)
+        LaunchEnvironment.sync(wanted) { [weak self] in self?.syncedEnvironment = nil }
     }
 
     private func showMenu() {

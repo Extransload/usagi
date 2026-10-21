@@ -6,7 +6,7 @@ All notable changes to Usagi. Each `## X.Y.Z` section is used as the release not
 
 ### Added
 
-- **Also Use in Apps** in the right-click menu: apps you open from now on (not only new terminals) use each service's **Active** account, if they run Claude Code or Codex underneath, such as editor extensions and the Codex desktop app. Apps that are already open need to be reopened. Turning it off undoes only what Usagi set; it also resets when you log out.
+- **Also Use in Apps** in the right-click menu: apps you open from now on (not only new terminals) use each service's **Active** account, if they run Claude Code or Codex underneath, such as editor extensions and the Codex desktop app. Reopen apps that are already open, also after switching accounts. Turning it off puts back whatever was set before. Terminal apps opened while it pointed at another account hand that account to their new tabs only until you switch back, because Usagi also tells the `usagi.zsh` and Agent Kit shell hooks which account it set.
 
 ## 1.0.7
 

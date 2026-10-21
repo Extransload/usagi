@@ -384,34 +384,46 @@ enum BridgeOutput {
 }
 
 /// "Also Use in Apps": the launchd user environment that apps opened from now on inherit, so they use the
-/// Active accounts as new terminals do. Usagi only ever undoes values it set itself.
+/// Active accounts as new terminals do. A value someone else had set is put back when Usagi undoes its own.
 enum AppEnvironment {
-    enum Target: Equatable { case folder(String), unset }
+    enum Target: Equatable { case value(String), unset }
 
-    static let enabledKey = "alsoUseInApps", appliedKey = "appEnvironmentSet"
-    static let variables = [("claude", "CLAUDE_CONFIG_DIR", ".claude"), ("codex", "CODEX_HOME", ".codex")]
+    static let enabledKey = "alsoUseInApps", appliedKey = "appEnvironmentSet", previousKey = "appEnvironmentPrevious"
+    static let providers = [("claude", "CLAUDE_CONFIG_DIR", ".claude", "CLAUDE"), ("codex", "CODEX_HOME", ".codex", "CODEX")]
+    /// The account variable plus the shell hooks' tracking variables: a terminal app opened while a profile
+    /// was set passes them to its new tabs, so usagi.zsh and Agent Kit's hook know to undo the inherited
+    /// folder once the Active account goes back to default.
+    static func names(_ key: String) -> [String] { ["_USAGI_\(key)_ACCOUNT", "_AGENTKIT_\(key)_ACCOUNT"] }
+    static var variables: [String] { providers.flatMap { [$0.1] + names($0.3) } }
 
-    /// Each variable's target for the Active accounts: the profile folder, or unset for `default`.
+    /// Each variable's target: the Active profile's folder (and its name for the trackers), or unset for
+    /// `default`. A provider missing from the snapshot, or a name that isn't a profile name, is left alone.
     static func wanted(_ snapshot: [String: Any], home: String) -> [String: Target] {
         let providers = snapshot["providers"] as? [String: Any] ?? [:]
         var targets: [String: Target] = [:]
-        for (provider, variable, folder) in variables {
-            guard let active = (providers[provider] as? [String: Any])?["active"] as? String else { continue }
-            targets[variable] = active != "default" && PageMessage.isAccount(active) ? .folder("\(home)/\(folder)-\(active)") : .unset
+        for (provider, variable, folder, key) in Self.providers {
+            guard let active = (providers[provider] as? [String: Any])?["active"] as? String,
+                  active == "default" || PageMessage.isAccount(active) else { continue }
+            let profile = active != "default"
+            targets[variable] = profile ? .value("\(home)/\(folder)-\(active)") : .unset
+            for name in names(key) { targets[name] = profile ? .value(active) : .unset }
         }
         return targets
     }
 
-    /// launchctl changes (variable, value or nil to unset) from `current` to `wanted` (nil when the option is
-    /// off). A variable is unset only while it still holds the value Usagi set (`applied`).
-    static func changes(wanted: [String: Target]?, current: [String: String], applied: [String: String]) -> [(String, String?)] {
-        var result: [(String, String?)] = []
-        for (_, variable, _) in variables {
+    struct Change: Equatable { let name: String, value: String?, ours: Bool }
+
+    /// launchctl changes from `current` to `wanted` (nil when the option is off): set Usagi's value (`ours`),
+    /// or undo it, only while it still holds, by restoring the value it replaced or unsetting.
+    static func changes(wanted: [String: Target]?, current: [String: String], applied: [String: String],
+                        previous: [String: String]) -> [Change] {
+        var result: [Change] = []
+        for variable in variables {
             let now = current[variable], ours = now != nil && now == applied[variable]
             switch wanted?[variable] {
-            case .folder(let value)? where now != value: result.append((variable, value))
-            case .unset? where ours: result.append((variable, nil))
-            case nil where wanted == nil && ours: result.append((variable, nil))
+            case .value(let value)? where now != value: result.append(Change(name: variable, value: value, ours: true))
+            case .unset? where ours, nil where wanted == nil && ours:
+                result.append(Change(name: variable, value: previous[variable], ours: false))
             default: break
             }
         }

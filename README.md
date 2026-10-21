@@ -57,7 +57,7 @@ Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the C
   for usagi in /Applications ~/Applications; do [[ -r $usagi/Usagi.app/Contents/Resources/usagi.zsh ]] && { source $usagi/Usagi.app/Contents/Resources/usagi.zsh; break; }; done
   ```
 
-  To have apps use it too (anything that runs Claude Code or Codex underneath, such as editor extensions and the Codex desktop app), turn on **Also Use in Apps** in the right-click menu. Usagi then sets `CLAUDE_CONFIG_DIR` and `CODEX_HOME` for apps you open from now on (`launchctl setenv`, no admin rights); reopen apps that are already open. Chat logins in the Claude and ChatGPT apps, and tools that keep their own sign-in, aren't affected. Turning it off undoes only what Usagi set, and it also resets when you log out.
+  To have apps use it too (anything that runs Claude Code or Codex underneath, such as editor extensions and the Codex desktop app), turn on **Also Use in Apps** in the right-click menu. Usagi then sets `CLAUDE_CONFIG_DIR` and `CODEX_HOME` (`launchctl setenv`, no admin rights) for apps and background jobs you start from now on; reopen apps that are already open, also after you switch accounts. Chat logins in the Claude and ChatGPT apps, and tools that keep their own sign-in, aren't affected. Turning it off puts back whatever was set before. The setting lasts until you log out, even if you quit Usagi, and Usagi sets it again when it starts after you log in, so turn the option off before uninstalling Usagi.
 
 - **Hide** (the crossed-out eye) only hides the card. The account stays signed in and keeps its profile folder; add it back with **＋**.
 - Each limit shows when its reading was taken (**Updated 4m ago**) and when the limit resets. A reading that may be out of date says so, and a limit that has reset since the last reading shows **Reset** until the CLI reports a new value.
@@ -104,7 +104,7 @@ Checked on the developer's Mac on 2026-10-21.
 
 Checked:
 
-- 99 Python tests, 193 Swift checks, and 255 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
+- 99 Python tests, 198 Swift checks, and 255 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
 - Reading Claude Max 20x, Codex Team and Codex Free accounts with the short `PATH` an app opened from Finder gets
 - A CLI installed the npm way (a `#!/usr/bin/env node` script next to its own `node` under `~/.nvm`, simulated with a stand-in CLI) found and run without Node on `PATH`
 - Starting with an empty home folder: no cards, an onboarding card, and the bridge's answers for signed-out and missing CLIs
