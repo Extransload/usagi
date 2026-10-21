@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]  # tags are built by release.yml
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash  # bash --noprofile --norc -eo pipefail
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15, macos-26, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Environment
+        run: |
+          sw_vers
+          uname -m
+          /usr/bin/python3 --version
+          /usr/bin/swiftc --version
+
+      - name: Shell syntax
+        run: |
+          for f in $(git ls-files '*.sh' '*.zsh'); do
+            case $(head -1 "$f") in
+              *bash*) bash -n "$f" ;;
+              '#!/bin/sh'*) sh -n "$f" ;;
+              *) zsh -n "$f" ;;
+            esac
+            echo "ok $f"
+          done
+
+      - name: Python tests
+        run: /usr/bin/python3 -m unittest discover -s tests
+
+      - name: Swift tests
+        run: tests/swift/run.sh
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Verify app
+        run: .github/verify-app.sh build/Usagi.app "$(/usr/bin/plutil -extract CFBundleShortVersionString raw Info.plist)"
+
+      - name: Bridge smoke test
+        timeout-minutes: 3
+        run: |
+          home=$(mktemp -d)
+          HOME=$home /usr/bin/python3 build/Usagi.app/Contents/Resources/bridge.py snapshot > "$RUNNER_TEMP/snapshot.json"
+          cat "$RUNNER_TEMP/snapshot.json"
+          /usr/bin/python3 - "$RUNNER_TEMP/snapshot.json" <<'PY'
+          import json, plistlib, sys
+          snapshot = json.load(open(sys.argv[1]))
+          assert isinstance(snapshot.get("providers"), dict), "no providers"
+          expected = plistlib.load(open("build/Usagi.app/Contents/Info.plist", "rb"))["CFBundleShortVersionString"]
+          assert snapshot.get("version") == expected, (snapshot.get("version"), expected)
+          PY
+
+      - name: Launch smoke test
+        timeout-minutes: 3
+        run: |
+          home=$(mktemp -d)
+          app_bin="$GITHUB_WORKSPACE/build/Usagi.app/Contents/MacOS/Usagi"
+          HOME=$home "$app_bin" > "$RUNNER_TEMP/app.log" 2>&1 &
+          pid=$!
+          sleep 8
+          if ! pgrep -f -x "$app_bin" > /dev/null; then
+            echo "::error::Usagi exited during launch"
+            cat "$RUNNER_TEMP/app.log"
+            exit 1
+          fi
+          kill "$pid"
+          echo "Usagi was still running after 8 seconds"
