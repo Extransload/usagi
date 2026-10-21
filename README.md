@@ -50,7 +50,7 @@ Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the C
 - On first launch, the CLI accounts you are already signed in to (`default`) appear as cards. With none, the menu tells you what to install or offers **Add account**.
 - **＋** then Claude or Codex adds an account card. Usagi shows a hidden existing account if there is one; otherwise it creates a new profile such as `account-2` (`~/.claude-account-2`, `~/.codex-account-2`).
 - The sign-in button opens the official CLI sign-in in your browser. While it is open the card shows **Connecting…**; if sign-in fails or times out (after 10 minutes), the card says why. On a signed-in card the same button is **Sign in again**.
-- When a service has several accounts, flip through them with **‹ ›** at the top right of the card, a horizontal trackpad swipe, or the arrow keys. `default` comes first, and the account new terminals use is marked **Terminal default**.
+- When a service has several accounts, flip through them with **‹ ›** at the top right of the card, a horizontal trackpad swipe, or the arrow keys. `default` comes first, and the account new terminals use is marked **Active**.
 - **Use in new terminals** (✓) picks that account for new terminals. To make it take effect, add this line to `~/.zshrc` (or `~/.bashrc`). It applies to `claude` and `codex` runs started afterwards, including new tmux panes; sessions already running keep their account.
 
   ```sh
