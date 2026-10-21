@@ -203,7 +203,8 @@ function extras(a){
       return `<p class="extra" title="${esc(title)}"><b>${esc(x.count)} free limit reset${x.count>1?'s':''}</b>${dates.length?`<span>· ${x.count>1?'next ':''}expires ${esc(shortDate(dates[0]))}</span>`:''}</p>`;
     }
     if(x?.kind==='credit'&&Number(x.remaining)>0){
-      const money=v=>x.currency==='USD'?`$${Math.round(v*100)/100}`:`${Math.round(v*100)/100} ${x.currency||''}`.trim();
+      const code=/^[A-Z]{3}$/.test(x.currency||'')?x.currency:'USD';
+      const money=v=>new Intl.NumberFormat('en-US',{style:'currency',currency:code,minimumFractionDigits:Number.isInteger(Number(v))?0:2,maximumFractionDigits:2}).format(Number(v)||0);
       const title=`Credit Claude Code reports next to your limits (for example a cloud-session promotion): ${money(x.remaining)} of ${money(x.limit)} left.`;
       return `<p class="extra" title="${esc(title)}"><b>${esc(money(x.remaining))} credit left</b>${Number.isFinite(x.expires_at)?`<span>· expires ${esc(shortDate(x.expires_at))}</span>`:''}</p>`;
     }

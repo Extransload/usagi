@@ -320,8 +320,13 @@ class CodexLiveTests(IsolatedTest):
             {"status": "available"}, "junk"]}
         self.assertEqual(bridge.codex_extras(resets, now=now),
                          [{"kind": "resets", "count": 3, "expires_at": [now + 100, now + 900]}])
-        for empty in ({"credits": []}, {"credits": None}, None, False, {"credits": [{"status": "used"}]}):
+        for empty in ({"credits": []}, {"credits": None}, None, False, {"credits": [{"status": "used"}]},
+                      {"availableCount": 0, "credits": None}, {"credits": [{"status": "available", "expiresAt": 0}]}):
             self.assertEqual(bridge.codex_extras(empty, now=now), [])
+        self.assertEqual(bridge.codex_extras({"availableCount": 2, "credits": None}, now=now),
+                         [{"kind": "resets", "count": 2, "expires_at": []}], "only the count is known")
+        capped = {"availableCount": 5, "credits": [{"status": "available", "expiresAt": now + 60}] * 3}
+        self.assertEqual(bridge.codex_extras(capped, now=now)[0]["count"], 5, "a capped list")
 
     def test_plan_names_are_capitalized_like_claude(self):
         self.assertEqual([bridge.plan_name(value) for value in ("free", "team", "plus", "pro", "Business", "team_plus", "", None, 3)],

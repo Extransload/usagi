@@ -427,13 +427,21 @@ def codex_extras(resets, now=None):
     """Free limit resets Codex granted (rateLimitResetCredits): how many are still available, and when
     they expire (soonest first)."""
     now = time.time() if now is None else now
-    credits = resets.get("credits") if isinstance(resets, dict) else None
-    available = [item for item in credits if isinstance(item, dict) and item.get("status") == "available"
-                 and (readers._number(item.get("expiresAt")) or now + 1) > now] if isinstance(credits, list) else []
-    if not available:
+    if not isinstance(resets, dict):
         return []
-    expires = sorted(t for t in (readers._number(item.get("expiresAt")) for item in available) if t is not None)
-    return [{"kind": "resets", "count": len(available), "expires_at": expires}]
+    credits = resets.get("credits")
+    expiries = []  # one per available, unexpired reset; None when it has no expiry
+    for item in credits if isinstance(credits, list) else []:
+        if isinstance(item, dict) and item.get("status") == "available":
+            expires = readers._number(item.get("expiresAt"))
+            if expires is None or expires > now:
+                expiries.append(expires)
+    # The list can be missing (null) or capped by the server; availableCount still says how many there are.
+    listed = readers._number(resets.get("availableCount"))
+    count = max(len(expiries), int(listed) if listed and listed > 0 else 0)
+    if not count:
+        return []
+    return [{"kind": "resets", "count": count, "expires_at": sorted(t for t in expiries if t is not None)}]
 
 
 def plan_name(value):
