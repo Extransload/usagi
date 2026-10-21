@@ -52,9 +52,9 @@ class IsolatedTest(unittest.TestCase):
             patch = mock.patch.object(module, name, value)
             patch.start()
             self.addCleanup(patch.stop)
-        for cached in (bridge.find_cli, bridge.app_version):
-            cached.cache_clear()
-            self.addCleanup(cached.cache_clear)
+        for clear in (bridge.FOUND.clear, bridge.app_version.cache_clear):
+            clear()
+            self.addCleanup(clear)
         self.addCleanup(self.stop_children)
         self.assertEqual(Path.home(), self.home)
         for path in (bridge.CONFIG_DIR, bridge.CARD_FILE, bridge.LOGIN_DIR, accounts.STATE, usage.CLAUDE_PROFILE):

@@ -1,4 +1,5 @@
 import contextlib
+import errno
 import io
 import json
 import os
@@ -6,6 +7,7 @@ from pathlib import Path
 import plistlib
 import signal
 import subprocess
+import threading
 import time
 import unittest
 from unittest import mock
@@ -122,29 +124,41 @@ class SnapshotTests(IsolatedTest):
         self.assertEqual(result["providers"]["claude"]["accounts"][0]["status"], "unknown")
 
     def test_first_run_checks_each_account_once_and_concurrently(self):
-        calls = []
+        calls, together = [], threading.Barrier(2, timeout=5)  # broken unless both run at once
 
         def check(provider, name):
             calls.append((provider, name))
-            time.sleep(0.3)
+            together.wait()
             return {"status": "signed_in"}
 
         with mock.patch.object(bridge, "check_account", side_effect=check):
-            started = time.monotonic()
             result = bridge.snapshot()
-            elapsed = time.monotonic() - started
         self.assertEqual(sorted(calls), [("claude", "default"), ("codex", "default")])
         self.assertEqual(result["cards"], [{"provider": "claude", "id": "default"}, {"provider": "codex", "id": "default"}])
-        self.assertLess(elapsed, 0.55)
 
     def test_accounts_are_checked_concurrently(self):
         bridge.save_cards([{"provider": provider, "id": name} for provider in ("claude", "codex")
                            for name in ("default", "work")])
+        together = threading.Barrier(4, timeout=5)
         with mock.patch.object(bridge, "check_account",
-                               side_effect=lambda *_: time.sleep(0.3) or {"status": "signed_out"}):
-            started = time.monotonic()
-            bridge.snapshot()
-        self.assertLess(time.monotonic() - started, 0.55)
+                               side_effect=lambda *_: together.wait() and {"status": "signed_out"}
+                               or {"status": "signed_out"}):
+            result = bridge.snapshot()
+        self.assertEqual([account["status"] for account in result["providers"]["codex"]["accounts"]],
+                         ["signed_out", "signed_out"])
+
+    def test_first_run_add_auto_and_remove_check_each_account_once(self):
+        for action, expected in ((["add_auto", "codex"], [("claude", "default"), ("codex", "account-2"),
+                                                          ("codex", "default")]),
+                                 (["remove", "codex", "default"], [("claude", "default"), ("codex", "default")])):
+            with self.subTest(action=action[0]):
+                bridge.CARD_FILE.unlink(missing_ok=True)
+                calls = []
+                with mock.patch.object(bridge, "check_account",
+                                       side_effect=lambda *key: calls.append(key) or {"status": "signed_in"}), \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    bridge.main(action)
+                self.assertEqual(sorted(calls), expected)
 
     def test_logged_out_account_never_exposes_cached_usage(self):
         bridge.save_cards([{"provider": "claude", "id": "default"}])
@@ -189,6 +203,26 @@ class SnapshotTests(IsolatedTest):
             self.assertEqual(bridge.visible_cards(), [])
         add.assert_not_called()
 
+    def test_adding_an_older_profile_backfills_the_agent_kit_marker_only(self):
+        bridge.save_cards([])
+        (self.home / ".codex-account-2/.agentkit-profile").write_text("Agent Kit's own\n")
+        team = self.home / ".claude-team"
+        team.mkdir()
+        (team / ".agentkit-profile").write_text("")
+        with mock.patch.object(bridge.accounts, "add") as add:
+            bridge.add_card("claude", "work")
+            bridge.add_card("codex", "account-2")
+            bridge.add_card("claude", "team")
+            bridge.add_card("claude", "default")
+        add.assert_not_called()
+        marker = self.home / ".claude-work/.agentkit-profile"
+        self.assertEqual(marker.read_text(), "Created by Usagi; safe to keep.\n")
+        self.assertEqual(marker.stat().st_mode & 0o777, 0o600)
+        self.assertFalse((self.home / ".codex-work/.agentkit-profile").exists())
+        self.assertEqual((self.home / ".codex-account-2/.agentkit-profile").read_text(), "Agent Kit's own\n")
+        self.assertFalse((team / ".usagi-profile").exists())
+        self.assertFalse((self.home / ".claude/.agentkit-profile").exists())
+
     def test_provider_tile_reuses_hidden_profile_then_creates_the_next_one(self):
         bridge.save_cards([])
         self.assertEqual(bridge.add_next_card("claude"), "default")
@@ -215,9 +249,37 @@ class SnapshotTests(IsolatedTest):
                          {"error": "Codex CLI not found. Install it, then try again.", "code": "cli_missing"})
         self.assertEqual(bridge.error_output(ValueError("Invalid command")), {"error": "Invalid command"})
 
+    def test_system_errors_read_as_sentences(self):
+        claude = str(self.home / ".local/bin/claude")
+        for exc, expected in ((OSError(errno.ENOEXEC, "Exec format error", claude),
+                               "~/.local/bin/claude is not a program this Mac can run"),
+                              (PermissionError(errno.EACCES, "Permission denied", "/opt/x"),
+                               "Usagi is not allowed to use /opt/x"),
+                              (OSError(errno.ENOSPC, "No space left on device", claude), "The disk is full"),
+                              (OSError(errno.EIO, "Input/output error", claude), "Input/output error: ~/.local/bin/claude"),
+                              (OSError(errno.EIO, "Input/output error"), "Input/output error"),
+                              (OSError("Usagi is quitting"), "Usagi is quitting")):
+            with self.subTest(exc=exc):
+                self.assertEqual(bridge.error_output(exc), {"error": expected})
+
+    def test_profile_folder_that_cannot_be_made_is_explained(self):
+        bridge.save_cards([{"provider": "claude", "id": "default"}])
+        for name in ("work", "account-2", "account-10"):
+            (self.home / (".claude-" + name) / ".usagi-profile").unlink()
+            (self.home / (".claude-" + name)).rmdir()
+        self.home.chmod(0o555)
+        self.addCleanup(self.home.chmod, 0o755)
+        with mock.patch.object(bridge, "check_account", return_value={"status": "signed_out"}), \
+             contextlib.redirect_stdout(io.StringIO()), self.assertRaises(PermissionError) as raised:
+            bridge.main(["add_auto", "claude"])
+        self.assertEqual(bridge.error_output(raised.exception),
+                         {"error": "Usagi is not allowed to use ~/.claude-account-2"})
+
 
 FAKE_LIVE_CODEX = '''
 import json, sys, time
+if sys.argv[1:] == ["login", "status"]:
+    raise SystemExit(0)
 def out(text):
     sys.stdout.write(text)
     sys.stdout.flush()
@@ -251,7 +313,26 @@ class CodexLiveTests(IsolatedTest):
     def test_signed_out_and_api_key_accounts(self):
         self.assertEqual(self.live("None"), {"status": "signed_out"})
         self.assertEqual(self.live('{"type": "apiKey"}'), {"status": "signed_in"})
-        self.assertEqual(self.live("[]"), {"status": "unknown"})
+        self.assertEqual(self.live("[]"), {"status": "signed_in"})  # no usable answer: `codex login status`
+
+    def test_cli_without_account_methods_or_app_server_falls_back_to_login_status(self):
+        older = '''
+import json, sys
+if sys.argv[1:] == ["login", "status"]:
+    raise SystemExit(%d)
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("id") == 1:
+        print(json.dumps({"id": 1, "result": {}}), flush=True)
+    elif "id" in message:
+        print(json.dumps({"id": message["id"], "error": {"code": -32601, "message": "Method not found"}}), flush=True)
+'''
+        self.fake_cli("codex", older % 0)
+        self.assertEqual(bridge.codex_live("default"), {"status": "signed_in"})
+        self.fake_cli("codex", older % 1)
+        self.assertEqual(bridge.codex_live("default"), {"status": "signed_out"})
+        self.fake_cli("codex", 'import sys\nraise SystemExit(0 if sys.argv[1:] == ["login", "status"] else 2)\n')
+        self.assertEqual(bridge.codex_live("default"), {"status": "signed_in"})
 
     def test_malformed_limits_are_ignored(self):
         info = self.live('{"type": "chatgpt", "email": 7}', limits='{"primary": [1], "secondary": "x"}')
@@ -262,27 +343,31 @@ class CodexLiveTests(IsolatedTest):
     def test_partial_line_never_completed_respects_the_deadline(self):
         self.fake_cli("codex", '''
 import json, sys, time
+if sys.argv[1:] == ["login", "status"]:
+    time.sleep(30)
 for line in sys.stdin:
     if json.loads(line).get("id") == 1:
         sys.stdout.write('{"id": 1, "res')
         sys.stdout.flush()
         time.sleep(30)
 ''')
-        with mock.patch.object(bridge, "APP_SERVER_TIMEOUT", 0.5):
+        with mock.patch.object(bridge, "APP_SERVER_TIMEOUT", 0.5), mock.patch.object(bridge, "STATUS_TIMEOUT", 0.5):
             started = time.monotonic()
             self.assertEqual(bridge.codex_live("default"), {"status": "unknown"})
-        self.assertLess(time.monotonic() - started, 2)
+        self.assertLess(time.monotonic() - started, 4)
 
     def test_app_server_process_group_is_stopped(self):
         self.fake_cli("codex", '''
-import subprocess, sys, time
-child = subprocess.Popen(["/bin/sleep", "30"])
+import os, subprocess, sys, time
+if sys.argv[1] != "app-server":
+    raise SystemExit(3)
+child = subprocess.Popen(["/bin/sleep", "30"], stdout=subprocess.DEVNULL)
 open(sys.argv[0] + ".pid", "w").write(str(child.pid))
+os.close(1)  # codex_live sees EOF only once the pid is written, however slowly this started
 time.sleep(30)
 ''')
         pid_file = Path(str(self.home / ".local/bin/codex") + ".pid")
-        with mock.patch.object(bridge, "APP_SERVER_TIMEOUT", 0.5):
-            self.assertEqual(bridge.codex_live("default"), {"status": "unknown"})
+        self.assertEqual(bridge.codex_live("default"), {"status": "unknown"})
         pid = int(pid_file.read_text())
         self.kill_later(pid)
         self.wait_for(lambda: not self.alive(pid), 3)
@@ -301,6 +386,60 @@ time.sleep(30)
 
 
 class TerminationTests(IsolatedTest):
+    @staticmethod
+    def zombie(pid):
+        state = subprocess.run(["/bin/ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout
+        return state.strip().startswith("Z")
+
+    def test_stop_ends_the_group_of_a_cli_that_already_exited(self):
+        pid_file = self.root / "grandchild.pid"
+        process = bridge.start([PYTHON, "-c", 'import os, subprocess, sys\n'
+                                'child = subprocess.Popen(["/bin/sleep", "30"])\n'
+                                'open(sys.argv[1] + ".tmp", "w").write(str(child.pid))\n'
+                                'os.rename(sys.argv[1] + ".tmp", sys.argv[1])', str(pid_file)])
+        self.wait_for(pid_file.exists)
+        grandchild = int(pid_file.read_text())
+        self.kill_later(grandchild)
+        self.wait_for(lambda: self.zombie(process.pid))  # exited, not reaped yet
+        bridge.stop(process)
+        self.wait_for(lambda: not self.alive(grandchild), 3)
+        self.assertEqual(bridge.CHILDREN, set())
+
+    def test_stop_never_signals_a_cli_reaped_before(self):
+        process = bridge.start(["/usr/bin/true"])
+        process.wait()
+        with mock.patch.object(bridge.os, "killpg") as killpg:
+            bridge.stop(process)
+        killpg.assert_not_called()
+        self.assertEqual(bridge.CHILDREN, set())
+
+    def test_sigterm_kills_children_that_ignore_it_and_starts_no_new_ones(self):
+        status_ran = self.root / "status-ran"
+        self.fake_cli("claude", 'print(\'{"loggedIn": false}\')\nraise SystemExit(1)')
+        self.fake_cli("codex", '''
+import os, signal, sys, time
+if sys.argv[1:] == ["login", "status"]:
+    open(%r, "w").write("ran")
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+open(sys.argv[0] + ".pid", "w").write(str(os.getpid()))
+time.sleep(30)
+''' % str(status_ran))
+        pid_file = Path(str(self.home / ".local/bin/codex") + ".pid")
+        process = subprocess.Popen([PYTHON, str(ROOT / "bridge.py"), "snapshot"], stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, env=dict(os.environ))
+        self.addCleanup(process.kill)
+        self.wait_for(lambda: pid_file.exists() and pid_file.read_text())
+        pid = int(pid_file.read_text())
+        self.kill_later(pid)
+        started = time.monotonic()
+        process.send_signal(signal.SIGTERM)
+        process.communicate(timeout=5)
+        self.assertEqual(process.returncode, 128 + signal.SIGTERM)
+        self.assertLess(time.monotonic() - started, 1.9)  # Swift SIGKILLs the bridge after 2 s
+        self.wait_for(lambda: not self.alive(pid), 1)
+        self.assertFalse(status_ran.exists())
+
     def test_sigterm_stops_the_cli_children(self):
         self.fake_cli("claude", 'print(\'{"loggedIn": false}\')\nraise SystemExit(1)')
         self.fake_cli("codex", '''
@@ -312,13 +451,19 @@ time.sleep(30)
         process = subprocess.Popen([PYTHON, str(ROOT / "bridge.py"), "snapshot"], stdout=subprocess.PIPE,
                                    stderr=subprocess.DEVNULL, env=dict(os.environ))
         self.addCleanup(process.kill)
-        self.wait_for(pid_file.exists)
+        self.wait_for(lambda: pid_file.exists() and pid_file.read_text())
         pid = int(pid_file.read_text())
         self.kill_later(pid)
         process.send_signal(signal.SIGTERM)
         process.communicate(timeout=5)
         self.assertEqual(process.returncode, 128 + signal.SIGTERM)
         self.wait_for(lambda: not self.alive(pid), 3)
+
+    def test_handler_never_ignores_sigterm_for_later_children(self):
+        with mock.patch.object(bridge, "TERMINATING", False), mock.patch.object(bridge, "CHILDREN", set()), \
+             self.assertRaises(SystemExit):
+            bridge.terminate(signal.SIGTERM, None)
+        self.assertEqual(signal.getsignal(signal.SIGTERM), signal.SIG_DFL)
 
 
 class BrowserTests(IsolatedTest):

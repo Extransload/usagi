@@ -43,14 +43,17 @@ class MarkerTests(IsolatedTest):
             process.kill()
         process.wait()
 
-    def fake_worker(self, body):
-        """Swaps the real login worker for a script, so login() never starts a real sign-in."""
+    def fake_worker(self, body, started=None):
+        """Swaps the real login worker for a script, so login() never starts a real sign-in. With
+        `started`, login() waits for that file before reading the worker, however slow its start."""
         script = self.fake_cli("worker", body, self.root)
         real_start = bridge.start
 
         def start(command, *args, **kwargs):
             process = real_start([str(script)] if "login_worker" in command else command, *args, **kwargs)
             self.addCleanup(self.reap, process)
+            if started and "login_worker" in command:
+                self.wait_for(lambda: started.exists() and started.read_text())
             return process
         patch = mock.patch.object(bridge, "start", side_effect=start)
         patch.start()
@@ -116,7 +119,7 @@ time.sleep(30)
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                   start_new_session=True, env=dict(os.environ))
         self.addCleanup(self.reap, worker)
-        self.wait_for(lambda: pid_file.exists() and bridge.is_connecting("claude", "default"))
+        self.wait_for(lambda: pid_file.exists() and pid_file.read_text() and bridge.is_connecting("claude", "default"))
         cli = int(pid_file.read_text())
         self.kill_later(cli)
         bridge.stop_login("claude", "default")
@@ -133,13 +136,13 @@ time.sleep(30)
         start.assert_not_called()
 
     def test_ready_timeout_kills_the_worker_process_group(self):
+        pid_file = self.root / "worker.pid"
         self.fake_worker('''
 import os, subprocess, sys, time
 child = subprocess.Popen(["/bin/sleep", "30"])
 open(sys.argv[0] + ".pid", "w").write(str(child.pid))
 time.sleep(30)
-''')
-        pid_file = self.root / "worker.pid"
+''', started=pid_file)
         with mock.patch.object(bridge, "READY_TIMEOUT", 0.5), \
              self.assertRaisesRegex(RuntimeError, "Timed out opening the sign-in page"):
             bridge.login("claude", "default")
@@ -154,6 +157,14 @@ time.sleep(30)
         with self.assertRaisesRegex(RuntimeError, "Could not open the sign-in page in a browser"):
             bridge.login("claude", "default")
         self.assertIsNone(bridge.login_error("claude", "default"))
+
+    def test_hiding_a_card_stops_its_sign_in(self):
+        bridge.save_cards([{"provider": "claude", "id": "default"}])
+        holder = self.hold()
+        with mock.patch.object(bridge, "check_account", return_value={"status": "signed_out"}):
+            bridge.remove_card("claude", "default")
+        self.assertEqual(holder.wait(timeout=2), -signal.SIGTERM)
+        self.assertEqual(bridge.visible_cards(), [])
 
     def test_login_status_is_cheap_and_clears_errors_once_signed_in(self):
         bridge.accounts.write_private(bridge.login_error_file("claude", "default"), "failed")
@@ -222,6 +233,14 @@ class ClaudeLoginWorkerTests(IsolatedTest):
         # The real open-browser.sh refuses a non-https URL before opening anything.
         self.assertEqual(self.run_worker("bad-url", browser=None),
                          ("Could not open the sign-in page in a browser", 0))
+
+    def test_cli_that_is_not_a_program_is_explained(self):
+        self.script(self.home / ".local/bin/claude", "this is not a program\n")
+        with self.assertRaises(OSError):
+            bridge.login_worker("claude", "default")
+        self.assertEqual(bridge.login_error("claude", "default"),
+                         "~/.local/bin/claude is not a program this Mac can run")
+        self.assertEqual(bridge.CHILDREN, set())
 
 
 FAKE_CODEX_LOGIN = '''

@@ -13,10 +13,12 @@ _usagi_account_apply() {
   if [[ $name != default ]]; then
     export "$3=$HOME/.$2-$name"
   else
-    # Only undo a value this hook set, here or in a parent shell (tmux, IDE): exactly ~/.<cli>-<name>.
+    # Only undo a value this hook set, here or in a parent shell (tmux, IDE): exactly ~/.<cli>-<name>,
+    # and without a tracking variable (set before it existed) only a profile Usagi or Agent Kit made.
     value=${4#"$HOME/.$2-"}
     if [[ $value != "$4" && ${#value} -le 31 && $value == [abcdefghijklmnopqrstuvwxyz0123456789]* &&
-          $value != *[!abcdefghijklmnopqrstuvwxyz0123456789-]* ]]; then
+          $value != *[!abcdefghijklmnopqrstuvwxyz0123456789-]* ]] &&
+       [[ -n $5 || -e $4/.usagi-profile || -e $4/.agentkit-profile ]]; then
       unset "$3"
     fi
   fi

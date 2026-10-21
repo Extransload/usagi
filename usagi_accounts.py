@@ -22,10 +22,15 @@ STATE = AGENTKIT / "state" if AGENTKIT.is_dir() else HOME / ".config/usagi/state
 PROVIDERS = ("claude", "codex")
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,30}")  # use fullmatch: match() with $ accepts "work\n"
 MARKERS = (".usagi-profile", ".agentkit-profile")
+MARKER_TEXT = "Created by Usagi; safe to keep.\n"
 SHARED_CLAUDE = ("settings.json", "CLAUDE.md", "CLAUDE-omc.md", "hooks", "skills", "plugins",
                  "statusline", "agents", "commands", "keybindings.json", "output-styles")
 SHARED_CODEX = ("config.toml", "hooks.json", "AGENTS.md", "skills", "agents", "rules", "prompts")
-CREDENTIAL_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
+CREDENTIAL_KEYS = ("apiKeyHelper", "awsAuthRefresh", "awsCredentialExport")
+CREDENTIAL_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+                  "AWS_BEARER_TOKEN_BEDROCK", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                  "ANTHROPIC_VERTEX_PROJECT_ID", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+                  "GOOGLE_APPLICATION_CREDENTIALS")
 
 
 class AccountError(Exception):
@@ -132,8 +137,8 @@ def _link_shared(source_root, target_root, names):
 
 
 def _signs_in(settings):
-    """A Claude settings file with its own credentials (apiKeyHelper, or a token in env) would sign
-    every profile into the same account. One that can't be read is treated the same way."""
+    """A Claude settings file with its own credentials (a key helper, AWS or Vertex settings, or a token
+    in env) would sign every profile into the same account. One that can't be read counts too."""
     try:
         data = json.loads(settings.read_text())
     except (OSError, ValueError):
@@ -141,7 +146,8 @@ def _signs_in(settings):
     if not isinstance(data, dict):
         return True
     env = data.get("env")
-    return "apiKeyHelper" in data or (isinstance(env, dict) and any(key in env for key in CREDENTIAL_ENV))
+    return (any(key in data for key in CREDENTIAL_KEYS)
+            or isinstance(env, dict) and any(key in env for key in CREDENTIAL_ENV))
 
 
 def add(name, provider=None):
@@ -156,7 +162,7 @@ def add(name, provider=None):
         folder.mkdir(mode=0o700, exist_ok=True)
         for marker in MARKERS:  # both, so Agent Kit installed later sees the profile too
             if not (folder / marker).exists():
-                write_private(folder / marker, "Created by Usagi; safe to keep.\n")
+                write_private(folder / marker, MARKER_TEXT)
     shared, skipped = SHARED_CLAUDE, []
     settings = HOME / ".claude/settings.json"
     if claude in selected and settings.exists() and _signs_in(settings):
@@ -166,6 +172,17 @@ def add(name, provider=None):
               "codex": _link_shared(HOME / ".codex", codex, SHARED_CODEX)
               if codex in selected else []}
     return claude, codex, linked, skipped
+
+
+def add_missing_marker(name, provider):
+    """A profile Usagi made before it wrote both markers gets Agent Kit's too; nothing is overwritten."""
+    folder = dict(zip(PROVIDERS, dirs(name)))[provider]
+    if name == "default" or not (folder / ".usagi-profile").exists():
+        return
+    with contextlib.suppress(OSError):  # FileExistsError included: an existing marker stays as it is
+        fd = os.open(str(folder / ".agentkit-profile"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as file:
+            file.write(MARKER_TEXT)
 
 
 def account_info(name):

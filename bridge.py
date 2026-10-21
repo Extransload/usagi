@@ -2,6 +2,7 @@
 """Usagi's reader for Claude Code and Codex accounts. Prints usage metadata only, never credentials."""
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
+import errno
 import fcntl
 import functools
 import hashlib
@@ -17,6 +18,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -32,9 +34,9 @@ READY_TIMEOUT = 15         # until the sign-in page is open
 STATUS_TIMEOUT = 5
 APP_SERVER_TIMEOUT = 8
 SHELL_TIMEOUT = 5
-SHELL_RETRY = 3600         # a CLI the login shell could not find is looked up again after this
 STOP_WAIT = 5              # for a previous sign-in worker to exit, per signal
-UPDATE_STEP_TIMEOUT = 900
+UPDATE_STEP_TIMEOUT = 300   # per brew step; the page gives up after 11 minutes
+TERM_GRACE = 0.7           # Swift SIGKILLs the bridge 2 s after its SIGTERM
 CLI_FOLDERS = ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin")
 CLI_NAMES = {"claude": "Claude Code CLI", "codex": "Codex CLI"}
 BREW_PREFIXES = ("/opt/homebrew", "/usr/local")
@@ -43,6 +45,9 @@ RELEASES_URL = "https://github.com/Extransload/usagi/releases/latest"
 APP_PATH = Path(__file__).resolve().parents[2]  # Usagi.app/Contents/Resources/bridge.py
 BROWSER_SCRIPT = Path(__file__).resolve().with_name("open-browser.sh")
 CHILDREN = set()  # running CLIs we started; SIGTERM stops them
+FOUND = {}  # CLI paths looked up in this run; None for a miss
+STARTING = threading.RLock()  # held while a child starts, so SIGTERM never misses one
+TERMINATING = False  # set by SIGTERM; no child starts after that
 
 
 class CliMissing(RuntimeError):
@@ -53,23 +58,29 @@ class CliMissing(RuntimeError):
 
 
 def start(command, env=None, **options):
-    """Popen in a new session, so stop() can end the CLI together with anything it spawned."""
+    """Popen in a new session, so stop() can end the CLI together with anything it spawned. Refused
+    once SIGTERM arrived, as an OSError like any CLI that can't start."""
     options.setdefault("stdin", subprocess.DEVNULL)
-    process = subprocess.Popen(command, env=env, start_new_session=True, **options)
-    CHILDREN.add(process)
+    with STARTING:
+        if TERMINATING:
+            raise OSError("Usagi is quitting")
+        process = subprocess.Popen(command, env=env, start_new_session=True, **options)
+        CHILDREN.add(process)
     return process
 
 
 def stop(process):
-    """Closes our pipes and ends the process group: SIGTERM, then SIGKILL, waiting at most 2 s each."""
+    """Closes our pipes and ends the process group: SIGTERM, then SIGKILL, waiting at most 2 s each.
+    The group is signalled even when the CLI itself already exited, so what it spawned goes too: until
+    we reap it, its PID and group can't be reused. One reaped before this call is left alone."""
     try:
         for stream in (process.stdin, process.stdout, process.stderr):
             if stream:
                 with contextlib.suppress(OSError):
                     stream.close()
+        if process.returncode is not None:
+            return
         for sig in (signal.SIGTERM, signal.SIGKILL):
-            if process.poll() is not None:  # once reaped, its PID may be reused: never signal it
-                return
             with contextlib.suppress(OSError):
                 os.killpg(process.pid, sig)
             with contextlib.suppress(subprocess.TimeoutExpired):
@@ -79,12 +90,32 @@ def stop(process):
 
 
 def terminate(signum, _frame):
-    """Swift's watchdog sends SIGTERM: stop our CLIs, then exit through the finally blocks."""
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    for process in list(CHILDREN):
-        if process.returncode is None:
-            with contextlib.suppress(OSError):
-                os.killpg(process.pid, signal.SIGTERM)
+    """Swift's watchdog sends SIGTERM and SIGKILLs us 2 s later, but our CLIs run in their own
+    sessions and would outlive us: SIGTERM their groups, SIGKILL what is left after TERM_GRACE, then
+    exit through the finally blocks. A flag guards re-entry; SIG_IGN would be inherited by children."""
+    global TERMINATING
+    if TERMINATING:
+        return
+    with STARTING:  # a child starting in another thread is in CHILDREN once we hold this
+        TERMINATING = True
+    groups = {process.pid: process for process in list(CHILDREN) if process.returncode is None}
+    for pgid in groups:
+        with contextlib.suppress(OSError):
+            os.killpg(pgid, signal.SIGTERM)
+    deadline = time.monotonic() + TERM_GRACE
+    while groups and time.monotonic() < deadline:
+        time.sleep(0.02)
+        for pgid, process in list(groups.items()):
+            try:  # poll() reaps the leader unless another frame waits on it; signal 0 finds the rest
+                if process.poll() is not None:
+                    os.killpg(pgid, 0)
+            except ProcessLookupError:
+                del groups[pgid]
+            except OSError:
+                pass
+    for pgid in groups:
+        with contextlib.suppress(OSError):
+            os.killpg(pgid, signal.SIGKILL)
     raise SystemExit(128 + signum)
 
 
@@ -142,52 +173,95 @@ def cli_folders():
             home / ".asdf/shims", home / ".local/share/mise/shims", *(folder for folder, _ in versions)]
 
 
-@functools.lru_cache(maxsize=None)
-def find_cli(name, fresh=False):
-    """Absolute path of the CLI, or None: PATH, the usual install spots, then the login shell."""
-    found = shutil.which(name)
-    if found:
-        return os.path.abspath(found)
-    for folder in cli_folders():
-        if is_executable(folder / name):
-            return str(folder / name)
-    return shell_cli(name, fresh)
+def find_cli(name, ask=False):
+    """Absolute path of the CLI, or None: PATH, the usual install spots, then the login shell's last
+    clean answer. Only user actions pass `ask`, which asks the login shell itself when all miss."""
+    if FOUND.get(name) is None and (ask or name not in FOUND):
+        found = shutil.which(name)
+        found = os.path.abspath(found) if found else next(
+            (str(folder / name) for folder in cli_folders() if is_executable(folder / name)), None)
+        FOUND[name] = found or shell_cli(name, ask)
+    return FOUND[name]
 
 
-def shell_cli(name, fresh):
-    """Asks the user's login shell, for installs only its startup files put on PATH. A found path is
-    cached and rechecked before use; a miss is asked again after SHELL_RETRY, or now when `fresh`."""
-    cache_file = CONFIG_DIR / "cli-paths.json"
+def find_clis(ask=()):
+    """Whether each CLI is there, looked up in this thread before concurrent checks need them. The
+    login shell is asked about the providers in `ask` only."""
+    return {provider: find_cli(provider, provider in ask) is not None for provider in accounts.PROVIDERS}
+
+
+def shell_answers():
     try:
-        cache = json.loads(cache_file.read_text())
+        cache = json.loads((CONFIG_DIR / "cli-paths.json").read_text())
     except (OSError, ValueError):
-        cache = {}
-    cache = cache if isinstance(cache, dict) else {}
-    entry = cache.get(name) if isinstance(cache.get(name), dict) else {}
-    path, checked = entry.get("path"), entry.get("checked_at")
+        return {}
+    return cache if isinstance(cache, dict) else {}
+
+
+def shell_cli(name, ask):
+    """The login shell's cached answer, rechecked before use. With `ask` a missing or outdated one is
+    asked for now; only a clean answer (a path or a clean miss) is cached, never a timeout."""
+    entry = shell_answers().get(name)
+    path = entry.get("path") if isinstance(entry, dict) else None
     if isinstance(path, str) and is_executable(path):
         return path
-    if (path is None and not fresh and isinstance(checked, (int, float))
-            and 0 <= time.time() - checked < SHELL_RETRY):
+    answer = login_shell_lookup(name) if ask else None
+    if answer is None:
         return None
-    path = login_shell_lookup(name)
-    cache[name] = {"path": path, "checked_at": time.time()}
-    with contextlib.suppress(OSError):
-        accounts.write_private(cache_file, json.dumps(cache))
+    path, login_path = answer
+    with contextlib.suppress(OSError):  # merged under a lock: another bridge may be writing too
+        accounts.private_dir(CONFIG_DIR)
+        fd = os.open(str(CONFIG_DIR / "cli-paths.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            accounts.write_private(CONFIG_DIR / "cli-paths.json", json.dumps(dict(
+                shell_answers(), login_path=login_path, **{name: {"path": path, "checked_at": time.time()}})))
+        finally:
+            os.close(fd)
     return path
 
 
 def login_shell_lookup(name):
+    """(path or None, the shell's PATH) from the user's login shell, for installs only its startup
+    files put on PATH; None unless the answer arrived whole between two sentinel lines in time.
+    Startup files may print anything before it. Reading stops at the closing sentinel and the shell's
+    group is killed right away (an interactive shell ignores SIGTERM), so ~/.zlogout or a background
+    job holding stdout can't hold it up."""
     try:
         shell = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell
     except KeyError:
         return None
     if not (os.path.isabs(shell) and is_executable(shell)):
         return None
-    result = run([shell, "-ilc", "command -v " + name], None, SHELL_TIMEOUT)
-    lines = result[1].strip().splitlines() if result and result[0] == 0 else []
-    last = lines[-1].strip() if lines else ""  # startup files may print anything before it
-    return last if os.path.isabs(last) and is_executable(last) else None
+    tag = "usagi-%s-" % os.urandom(8).hex()  # the command line holds it apart from begin/end
+    script = ("printf '\\n%%s%%s\\n' %s begin; printf '%%s\\n' \"$PATH\"; command -v %s; "
+              "printf '%%s%%s\\n' %s end" % (tag, name, tag))
+    try:
+        process = start([shell, "-ilc", script], None, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+    try:
+        reader, deadline, lines = LineReader(process.stdout), time.monotonic() + SHELL_TIMEOUT, None
+        while True:
+            line = reader.readline(deadline)
+            if not line:  # timed out, or the shell exited before the closing sentinel
+                return None
+            line = line.decode(errors="replace").rstrip("\r\n")
+            if line == tag + "begin":
+                lines = []
+            elif lines is not None and line == tag + "end":
+                break
+            elif lines is not None:
+                lines.append(line)
+    finally:
+        with contextlib.suppress(OSError):
+            os.killpg(process.pid, signal.SIGKILL)  # not reaped yet, so the group is still its own
+        stop(process)
+    if not lines:
+        return None
+    answer = lines[1:]  # `command -v`: one absolute path for a program; aliases and functions don't count
+    found = answer[0] if len(answer) == 1 and os.path.isabs(answer[0]) and is_executable(answer[0]) else None
+    return found, lines[0]
 
 
 def auth_context(provider, name):
@@ -206,8 +280,18 @@ def auth_context(provider, name):
         env[variable] = str(folder)
     executable = find_cli(provider)
     if executable:
-        # npm installs are `#!/usr/bin/env node` scripts; node sits next to them, not on a Finder PATH.
+        # npm, pnpm, yarn and bun installs are `#!/usr/bin/env node` scripts or wrappers calling node,
+        # and an app opened from Finder gets a short PATH: put the CLI's folder (node is often next to
+        # it), node's folder, ~/.bun/bin and the login shell's last PATH first.
         folders = [os.path.dirname(executable), os.path.dirname(os.path.realpath(executable))]
+        node = find_cli("node")
+        if node:
+            folders.append(os.path.dirname(node))
+        if (Path.home() / ".bun/bin").is_dir():
+            folders.append(str(Path.home() / ".bun/bin"))
+        login_path = shell_answers().get("login_path")
+        if isinstance(login_path, str):
+            folders += [part for part in login_path.split(os.pathsep) if os.path.isabs(part)]
         env["PATH"] = os.pathsep.join(dict.fromkeys(
             folders + [part for part in env.get("PATH", os.defpath).split(os.pathsep) if part]))
     return executable, env
@@ -327,8 +411,8 @@ def codex_live(name):
     account = result_of(responses.get(2), "account")
     if account is None:
         return {"status": "signed_out"}
-    if not isinstance(account, dict):
-        return {"status": "unknown"}
+    if not isinstance(account, dict):  # no answer (an older CLI, a slow start): ask `codex login status`
+        return {"status": cli_status("codex", name)}
     if account.get("type") != "chatgpt":
         return {"status": "signed_in"}
     windows = codex_windows(result_of(responses.get(3), "rateLimits"))
@@ -434,9 +518,10 @@ def account_entry(provider, name, check):
             "source": check.get("source"), "windows": check.get("windows") or {}}
 
 
-def snapshot():
-    checks = {}
-    cli = {provider: find_cli(provider) is not None for provider in accounts.PROVIDERS}
+def snapshot(checks=None, ask=()):
+    """`checks` carries results an action already has; `ask` names the CLIs to ask the login shell about."""
+    checks = {} if checks is None else checks
+    cli = find_clis(ask)
     cards = visible_cards(checks)
     run_checks([(card["provider"], card["id"]) for card in cards], checks)
     result = {"version": app_version(), "cards": cards, "providers": {}}
@@ -448,22 +533,26 @@ def snapshot():
     return result
 
 
-def add_card(provider, name):
+def add_card(provider, name, checks=None):
     if provider not in accounts.PROVIDERS:
         raise accounts.AccountError("Unknown provider")
     if name not in accounts.profiles(provider):
         accounts.add(name, provider)
-    cards = visible_cards()
+    else:
+        accounts.add_missing_marker(name, provider)
+    cards = visible_cards(checks)
     card = {"provider": provider, "id": name}
     if card not in cards:
         cards.append(card)
     save_cards(cards)
 
 
-def add_next_card(provider):
+def add_next_card(provider, checks=None):
+    """`checks` is filled on the way, so the snapshot after it checks no account twice."""
     if provider not in accounts.PROVIDERS:
         raise accounts.AccountError("Unknown provider")
-    shown = {card["id"] for card in visible_cards() if card["provider"] == provider}
+    find_clis(ask=(provider,))
+    shown = {card["id"] for card in visible_cards(checks) if card["provider"] == provider}
     name = next((candidate for candidate in accounts.profiles(provider) if candidate not in shown), None)
     if name is None:
         number = 2
@@ -471,15 +560,17 @@ def add_next_card(provider):
         while "account-%d" % number in existing:
             number += 1
         name = "account-%d" % number
-    add_card(provider, name)
+    add_card(provider, name, checks)
     return name
 
 
-def remove_card(provider, name):
-    cards = visible_cards()
+def remove_card(provider, name, checks=None):
+    find_clis()
+    cards = visible_cards(checks)
     card = {"provider": provider, "id": name}
     if card not in cards:
         raise accounts.AccountError("That account is not in the list")
+    stop_login(provider, name)  # a sign-in left open in the browser must not finish for a hidden card
     save_cards([item for item in cards if item != card])
 
 
@@ -692,7 +783,7 @@ def claude_login_worker(executable, env):
 
 def login(provider, name):
     validate_login(provider, name)
-    if find_cli(provider, fresh=True) is None:
+    if find_cli(provider, ask=True) is None:
         raise CliMissing(provider)
     stop_login(provider, name)
     clear_login_error(provider, name)
@@ -741,7 +832,8 @@ def login_worker(provider, name):
             claude_login_worker(executable, env)
     except Exception as exc:
         with contextlib.suppress(OSError):
-            accounts.write_private(login_error_file(provider, name), str(exc) or "Sign-in failed")
+            accounts.write_private(login_error_file(provider, name), friendly_error(exc) if str(exc)
+                                   else "Sign-in failed")
         raise
     finally:
         release_marker(path, lock)
@@ -808,8 +900,27 @@ def print_json(value):
     print(json.dumps(value, ensure_ascii=False))
 
 
+OS_ERRORS = {errno.ENOEXEC: "{} is not a program this Mac can run",
+             86: "{} is not a program this Mac can run",  # EBADARCH: built for another processor
+             errno.EACCES: "Usagi is not allowed to use {}", errno.EPERM: "Usagi is not allowed to use {}",
+             errno.ENOENT: "{} was not found", errno.EEXIST: "{} already exists",
+             errno.ENOTDIR: "{} is not a folder", errno.EISDIR: "{} is a folder",
+             errno.EROFS: "{} is on a read-only disk", errno.ENOSPC: "The disk is full"}
+
+
+def friendly_error(exc):
+    """The message people see: an OSError's "[Errno 8] Exec format error: '/x'" becomes a sentence."""
+    if not isinstance(exc, OSError) or not exc.strerror:
+        return str(exc) or type(exc).__name__
+    path, home = str(exc.filename or ""), str(Path.home()) + "/"
+    path = "~/" + path[len(home):] if path.startswith(home) else path
+    if not path:
+        return exc.strerror
+    return OS_ERRORS.get(exc.errno, exc.strerror + ": {}").format(path)
+
+
 def error_output(exc):
-    error = {"error": str(exc) or type(exc).__name__}
+    error = {"error": friendly_error(exc)}
     if isinstance(getattr(exc, "code", None), str):
         error["code"] = exc.code
     return error
@@ -818,17 +929,19 @@ def error_output(exc):
 def main(argv):
     migrate_legacy_config()
     action = argv[0] if argv else "snapshot"
-    if action == "snapshot" and len(argv) <= 1:
-        print_json(snapshot())
+    if action == "snapshot" and argv[1:] in ([], ["--ask-shell"]):  # --ask-shell: the refresh button
+        print_json(snapshot(ask=accounts.PROVIDERS if argv[1:] else ()))
     elif action == "select" and len(argv) == 3:
         accounts.use(argv[2], argv[1])
         print_json(snapshot())
     elif action == "add_auto" and len(argv) == 2:
-        added = add_next_card(argv[1])
-        print_json(dict(snapshot(), added=added))
+        checks = {}
+        added = add_next_card(argv[1], checks)
+        print_json(dict(snapshot(checks), added=added))
     elif action == "remove" and len(argv) == 3:
-        remove_card(argv[1], argv[2])
-        print_json(snapshot())
+        checks = {}
+        remove_card(argv[1], argv[2], checks)
+        print_json(snapshot(checks))
     elif action == "login" and len(argv) == 3:
         login(argv[1], argv[2])
         print_json({"ok": True})

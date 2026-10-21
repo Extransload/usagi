@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import time
@@ -26,7 +28,7 @@ class CliLookupTests(IsolatedTest):
     def test_other_install_spots(self):
         for folder in (".asdf/shims", ".local/share/mise/shims", "Library/pnpm", ".yarn/bin", ".claude/local"):
             with self.subTest(folder=folder):
-                bridge.find_cli.cache_clear()
+                bridge.FOUND.clear()
                 path = self.executable(self.home / folder / "claude")
                 self.assertEqual(bridge.find_cli("claude"), str(path))
                 path.unlink()
@@ -52,67 +54,128 @@ class CliLookupTests(IsolatedTest):
         self.assertEqual(bridge.cli_status("claude", "default"), "signed_in")
         self.assertEqual(bridge.cli_status("codex", "default"), "signed_in")
 
+    def test_npm_prefix_script_finds_node_in_another_folder(self):
+        """~/.npm-global/bin has no node next to it; node is in Homebrew, not on the Finder PATH."""
+        brew = self.root / "homebrew/bin"
+        self.script(brew / "node", '#!/bin/sh\nexec "%s" "$@"\n' % PYTHON)
+        self.script(self.home / ".npm-global/bin/claude",
+                    '#!/usr/bin/env node\nimport json\nprint(json.dumps({"loggedIn": True}))\n')
+        self.assertEqual(os.environ["PATH"], "/usr/bin:/bin:/usr/sbin:/sbin")
+        with mock.patch.object(bridge, "CLI_FOLDERS", (str(brew),)):
+            self.assertEqual(bridge.cli_status("claude", "default"), "signed_in")
+
+    def test_bun_and_the_login_shell_path_are_on_the_cli_path(self):
+        self.script(self.home / ".bun/bin/bun", '#!/bin/sh\nexec "%s" "$@"\n' % PYTHON)
+        self.script(self.home / ".local/bin/claude",
+                    '#!/usr/bin/env bun\nimport json\nprint(json.dumps({"loggedIn": True}))\n')
+        shell_only = self.root / "shell-only/bin"  # on PATH only after the user's startup files ran
+        self.script(shell_only / "node", '#!/bin/sh\nexec "%s" "$@"\n' % PYTHON)
+        self.script(self.home / ".yarn/bin/codex", "#!/usr/bin/env node\nraise SystemExit(0)\n")
+        self.assertEqual(bridge.cli_status("claude", "default"), "signed_in")
+        self.assertEqual(bridge.cli_status("codex", "default"), "unknown")
+        bridge.accounts.write_private(bridge.CONFIG_DIR / "cli-paths.json",
+                                      json.dumps({"login_path": "relative:%s:/usr/bin" % shell_only}))
+        self.assertEqual(bridge.cli_status("codex", "default"), "signed_in")
+        _, env = bridge.auth_context("codex", "default")
+        self.assertNotIn("relative", env["PATH"].split(":"))
+
     def test_missing_cli(self):
         self.assertIsNone(bridge.find_cli("claude"))
 
 
 class LoginShellTests(IsolatedTest):
-    def shell(self, answer, delay=0):
-        """A login shell that logs its calls, prints some startup noise and then `answer`."""
+    def shell(self, setup="", delay=0, after=""):
+        """A login shell that logs its calls, prints startup noise (the last line unfinished), runs
+        `setup` like a ~/.zshrc, then the command it was given, then `after` like ~/.zlogout."""
         self.calls = self.root / "shell-calls"
         shell = self.script(self.root / "fake-shell", '''#!/bin/sh
-echo "$*" >> "%s"
+echo "$1" >> "%s"
 sleep %s
 echo "Welcome back!"
-printf '%%s\\n' "%s"
-''' % (self.calls, delay, answer))
+printf 'Last login: today'
+%s
+eval "$2"
+%s
+''' % (self.calls, delay, setup, after))
         os.environ["SHELL"] = str(shell)
 
     def call_count(self):
         return len(self.calls.read_text().splitlines()) if self.calls.exists() else 0
 
-    def test_login_shell_answer_is_cached_and_revalidated(self):
+    def cache(self):
+        return json.loads((bridge.CONFIG_DIR / "cli-paths.json").read_text())
+
+    def test_answer_is_cached_revalidated_and_asked_for_on_user_actions_only(self):
         target = self.script(self.root / "odd place/claude", "#!/bin/sh\n")
-        self.shell(target)
-        self.assertEqual(bridge.find_cli("claude"), str(target))
-        self.assertEqual(self.calls.read_text(), "-ilc command -v claude\n")
-        cache = bridge.CONFIG_DIR / "cli-paths.json"
-        self.assertEqual(json.loads(cache.read_text())["claude"]["path"], str(target))
-        self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
-        bridge.find_cli.cache_clear()
-        self.assertEqual(bridge.find_cli("claude"), str(target))
+        self.shell('PATH="%s:$PATH"' % target.parent)
+        self.assertIsNone(bridge.find_cli("claude"))  # a background refresh never starts the shell
+        self.assertEqual(self.call_count(), 0)
+        self.assertEqual(bridge.find_cli("claude", ask=True), str(target))
+        self.assertEqual(self.calls.read_text(), "-ilc\n")
+        self.assertEqual(self.cache()["claude"]["path"], str(target))
+        self.assertEqual(self.cache()["login_path"], "%s:%s" % (target.parent, os.environ["PATH"]))
+        self.assertEqual((bridge.CONFIG_DIR / "cli-paths.json").stat().st_mode & 0o777, 0o600)
+        bridge.FOUND.clear()
+        self.assertEqual(bridge.find_cli("claude"), str(target))  # the cached answer, no shell
         self.assertEqual(self.call_count(), 1)
-        target.chmod(0o644)  # no longer executable: ask again
-        bridge.find_cli.cache_clear()
+        target.chmod(0o644)  # no longer executable
+        bridge.FOUND.clear()
         self.assertIsNone(bridge.find_cli("claude"))
-        self.assertEqual(self.call_count(), 2)
-
-    def test_only_an_absolute_executable_last_line_counts(self):
-        for answer in ("claude: aliased to npx claude", "claude", str(self.root / "missing/claude")):
-            with self.subTest(answer=answer):
-                self.shell(answer)
-                bridge.find_cli.cache_clear()
-                self.assertIsNone(bridge.find_cli("claude", fresh=True))
-
-    def test_a_miss_is_not_asked_again_until_retry_or_sign_in(self):
-        self.shell("")
-        self.assertIsNone(bridge.find_cli("codex"))
-        bridge.find_cli.cache_clear()
-        self.assertIsNone(bridge.find_cli("codex"))
         self.assertEqual(self.call_count(), 1)
-        self.assertIsNone(bridge.find_cli("codex", fresh=True))
+        self.assertIsNone(bridge.find_cli("claude", ask=True))  # asked again; the clean miss is cached
         self.assertEqual(self.call_count(), 2)
-        bridge.find_cli.cache_clear()
-        with mock.patch.object(bridge, "SHELL_RETRY", 0):
-            bridge.find_cli("codex")
-        self.assertEqual(self.call_count(), 3)
+        self.assertIsNone(self.cache()["claude"]["path"])
 
-    def test_slow_shell_times_out(self):
-        self.shell("/bin/sh", delay=30)
-        with mock.patch.object(bridge, "SHELL_TIMEOUT", 0.3):
-            started = time.monotonic()
-            self.assertIsNone(bridge.find_cli("claude"))
+    def test_only_one_absolute_executable_answer_counts(self):
+        for setup in ("alias claude='npx claude'", "claude() { :; }",
+                      'command() { echo "%s"; }' % (self.root / "missing/claude"),
+                      "command() { echo /bin/sh; echo /bin/sh; }"):
+            with self.subTest(setup=setup):
+                self.shell(setup)
+                bridge.FOUND.clear()
+                self.assertIsNone(bridge.find_cli("claude", ask=True))
+                self.assertIsNone(self.cache()["claude"]["path"])
+
+    def test_snapshot_asks_only_for_the_refresh_button(self):
+        target = self.script(self.root / "odd place/codex", "#!/bin/sh\n")
+        self.shell('PATH="%s:$PATH"' % target.parent)
+        bridge.save_cards([])
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            bridge.main(["snapshot"])
+        self.assertEqual(self.call_count(), 0)
+        self.assertFalse(json.loads(output.getvalue())["providers"]["codex"]["cli"])
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            bridge.main(["snapshot", "--ask-shell"])
+        self.assertEqual(self.call_count(), 2)  # claude (a clean miss) and codex
+        self.assertTrue(json.loads(output.getvalue())["providers"]["codex"]["cli"])
+        with self.assertRaisesRegex(ValueError, "Invalid command"):
+            bridge.main(["snapshot", "--bogus"])
+
+    def test_slow_garbled_or_cut_short_answers_are_not_cached(self):
+        for options in ({"delay": 30}, {"setup": "echo /bin/sh; exit 0"},
+                        {"setup": "command() { kill -9 $$; }"}):
+            with self.subTest(options=options):
+                self.shell(**options)
+                bridge.FOUND.clear()
+                with mock.patch.object(bridge, "SHELL_TIMEOUT", 0.5):
+                    started = time.monotonic()
+                    self.assertIsNone(bridge.find_cli("claude", ask=True))
+                self.assertLess(time.monotonic() - started, 3)
+                self.assertFalse((bridge.CONFIG_DIR / "cli-paths.json").exists())
+                self.assertEqual(bridge.CHILDREN, set())
+
+    def test_zlogout_output_and_background_jobs_do_not_hold_the_answer(self):
+        target = self.script(self.root / "bin/claude", "#!/bin/sh\n")
+        job = self.root / "job.pid"
+        # A job started by the startup files keeps stdout open; ~/.zlogout prints and lingers.
+        self.shell('PATH="%s:$PATH"; /bin/sleep 30 & echo $! > "%s"' % (target.parent, job),
+                   after="echo 'Bye from zlogout'; /bin/sleep 30")
+        started = time.monotonic()
+        self.assertEqual(bridge.find_cli("claude", ask=True), str(target))
         self.assertLess(time.monotonic() - started, 3)
+        pid = int(job.read_text())
+        self.kill_later(pid)
+        self.wait_for(lambda: not self.alive(pid), 3)
         self.assertEqual(bridge.CHILDREN, set())
 
 
