@@ -132,14 +132,15 @@ enum Updates {
 
     @objc private func refreshNow() { controller.refresh(.user) }
 
-    /// From the right-click menu: check now and open the menu, where the footer or the banner shows the answer.
+    /// From the right-click menu: open the menu and let the page start the check, as a click on its footer
+    /// does, so "Checking…", "Up to date", the banner or "Couldn't check" show there.
     @objc private func checkForUpdatesNow() {
-        checkForUpdate(force: true) { [weak self] in
-            guard let self, !self.popover.isShown, let button = self.statusItem.button else { return }
+        if !popover.isShown, let button = statusItem.button {
             NSApp.activate()
-            self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            self.controller.view.window?.makeKey()
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            controller.view.window?.makeKey()
         }
+        controller.checkForUpdatesFromMenu()
     }
 
     /// Quit Usagi (menu or page) ends here too: don't leave a bridge run behind.
@@ -163,11 +164,8 @@ enum Updates {
         }
     }
 
-    private func checkForUpdate(force: Bool = false, then done: (@MainActor () -> Void)? = nil) {
-        Updates.check(force: force) { [weak self] info in
-            self?.controller.setUpdate(info)
-            done?()
-        }
+    private func checkForUpdate(force: Bool = false) {
+        Updates.check(force: force) { [weak self] info in self?.controller.setUpdate(info) }
     }
 
     /// Up to two cards' usage with provider icons, or the rabbit when there are no cards. Dimmed (and

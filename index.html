@@ -340,7 +340,7 @@ window.setProviderIcons=function(icons){
 window.setUpdate=function(info){
   if(!info||typeof info!=='object')return;
   checkFailedNow=checkingUpdate&&!!info.failed;checkingUpdate=false;clearTimeout(checkTimer);
-  if(!info.failed||!versionInfo||versionInfo.failed){versionInfo=info;updateInfo=info.version?info:null}
+  if(!info.failed||!versionInfo||versionInfo.failed){versionInfo=info;if(!updating)updateInfo=info.version?info:null}
   renderUpdate();renderVersion();
 };
 function renderVersion(){
@@ -349,12 +349,13 @@ function renderVersion(){
   const checked=versionInfo?.checked_at?new Date(Number(versionInfo.checked_at)*1000):null;
   const at=checked?` (checked ${checked.toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})})`:'';
   let state='',title='Check for updates';
-  if(checkingUpdate)state='Checking…';
+  if(updateInfo)state='Update available',title=`Usagi ${updateInfo.version} is available. Click to show it.`;
+  else if(checkingUpdate)state='Checking…';
   else if(checkFailedNow)state="Couldn't check",title="Couldn't reach GitHub. Click to try again.";
-  else if(updateInfo)state='Update available',title=`Usagi ${updateInfo.version} is available. Click to show it.`;
   else if(versionInfo?.latest)state='Up to date',title=`You have the latest version${at}. Click to check again.`;
   node.hidden=false;node.textContent=`Usagi ${current}${state?' · '+state:''}`;node.title=title;node.setAttribute('aria-label',`${node.textContent}. ${title}`);
 }
+window.checkForUpdates=function(){checkUpdates()};  // the right-click menu's Check for Updates, after opening the popover
 function checkUpdates(){
   if(updateInfo){updateHidden=false;renderUpdate();return}
   if(checkingUpdate)return;

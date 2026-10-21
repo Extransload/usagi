@@ -90,6 +90,8 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 
     func sendProviderIcons() { callPage("setProviderIcons", json: ProviderIcons.dataURLs()) }
 
+    func checkForUpdatesFromMenu() { callPage("checkForUpdates") }
+
     private func setAsleep(_ value: Bool) {
         guard value != asleep else { return }
         asleep = value
