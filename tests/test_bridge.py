@@ -310,6 +310,19 @@ class CodexLiveTests(IsolatedTest):
         self.assertEqual(info["windows"]["5h"]["used_percent"], 40)
         self.assertFalse(info["windows"]["5h"]["stale"])
 
+    def test_free_limit_resets_are_counted_soonest_first(self):
+        now = 1_800_000_000
+        resets = {"availableCount": 3, "credits": [
+            {"status": "available", "expiresAt": now + 900},
+            {"status": "available", "expiresAt": now + 100},
+            {"status": "used", "expiresAt": now + 500},
+            {"status": "available", "expiresAt": now - 1},
+            {"status": "available"}, "junk"]}
+        self.assertEqual(bridge.codex_extras(resets, now=now),
+                         [{"kind": "resets", "count": 3, "expires_at": [now + 100, now + 900]}])
+        for empty in ({"credits": []}, {"credits": None}, None, False, {"credits": [{"status": "used"}]}):
+            self.assertEqual(bridge.codex_extras(empty, now=now), [])
+
     def test_plan_names_are_capitalized_like_claude(self):
         self.assertEqual([bridge.plan_name(value) for value in ("free", "team", "plus", "pro", "Business", "team_plus", "", None, 3)],
                          ["Free", "Team", "Plus", "Pro", "Business", "Team Plus", None, None, None])

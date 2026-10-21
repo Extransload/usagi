@@ -419,7 +419,21 @@ def codex_live(name):
     email = account.get("email")
     return {"status": "signed_in", "email": email if isinstance(email, str) else None,
             "plan": plan_name(account.get("planType")), "windows": windows,
+            "extras": codex_extras(result_of(responses.get(3), "rateLimitResetCredits")),
             "source": "Codex account limits · official app-server" if windows else None}
+
+
+def codex_extras(resets, now=None):
+    """Free limit resets Codex granted (rateLimitResetCredits): how many are still available, and when
+    they expire (soonest first)."""
+    now = time.time() if now is None else now
+    credits = resets.get("credits") if isinstance(resets, dict) else None
+    available = [item for item in credits if isinstance(item, dict) and item.get("status") == "available"
+                 and (readers._number(item.get("expiresAt")) or now + 1) > now] if isinstance(credits, list) else []
+    if not available:
+        return []
+    expires = sorted(t for t in (readers._number(item.get("expiresAt")) for item in available) if t is not None)
+    return [{"kind": "resets", "count": len(available), "expires_at": expires}]
 
 
 def plan_name(value):
@@ -460,11 +474,12 @@ def check_account(provider, name):
             return {"status": status}
         claude_dir, _ = accounts.dirs(name)
         info = accounts.account_info(name)
+        profile_file = None if name == "default" else claude_dir / ".claude.json"
         return {"status": status, "email": info.get("email"), "plan": info.get("plan"),
                 "source": "Claude Code local cache",
-                "windows": readers.merge_windows(
-                    readers.read_claude_cached(None if name == "default" else claude_dir / ".claude.json"),
-                    readers.read_claude(readers.claude_cache_for(name)))}
+                "windows": readers.merge_windows(readers.read_claude_cached(profile_file),
+                                                 readers.read_claude(readers.claude_cache_for(name))),
+                "extras": readers.read_claude_credits(profile_file)}
     except Exception:
         return {"status": "unknown"}
 
@@ -523,7 +538,8 @@ def account_entry(provider, name, check):
     return {"id": name, "email": check.get("email"), "plan": check.get("plan"),
             "status": status, "logged_in": signed_in, "connecting": connecting,
             "login_error": None if signed_in or connecting else login_error(provider, name),
-            "source": check.get("source"), "windows": check.get("windows") or {}}
+            "source": check.get("source"), "windows": check.get("windows") or {},
+            "extras": check.get("extras") or []}
 
 
 def snapshot(checks=None, ask=()):

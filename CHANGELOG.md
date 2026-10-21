@@ -2,6 +2,16 @@
 
 All notable changes to Usagi. Each `## X.Y.Z` section is used as the release notes for that version: `release.sh` and the Release workflow stop if the section is missing.
 
+## 1.0.7
+
+### Added
+
+- Codex cards show the free limit resets Codex granted you ("2 free limit resets · next expires Oct 30"), and Claude cards show dollar credits Claude Code reports, such as the cloud-session credit for Max and Pro ("$250 credit left · expires Nov 5").
+
+### Changed
+
+- Two accounts of a service with the same email only get their number added when their plans match too.
+
 ## 1.0.6
 
 ### Fixed

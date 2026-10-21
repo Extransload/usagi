@@ -64,6 +64,7 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 .meta .stale{opacity:.85;font-style:italic}
 .t-claude{--tone:var(--peach);--tone-text:var(--peach-text)}.t-codex{--tone:var(--blue);--tone-text:var(--blue-text)}
 .t-amber{--tone:var(--amber);--tone-text:var(--amber-text)}.t-red{--tone:var(--red);--tone-text:var(--red-text)}.t-muted{--tone:var(--line);--tone-text:var(--muted)}
+.extra{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:10px;margin:0 0 7px}.extra b{color:var(--ink);font-weight:650}
 .no-data{margin:2px 0 8px;color:var(--muted);font-size:11px}
 .note{display:flex;align-items:center;gap:6px;margin:0 0 7px;color:var(--muted);font-size:10px}.note svg{width:12px;height:12px}.note.warn{color:var(--red-text)}
 .note span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -184,14 +185,31 @@ function button(cls,action,p,id,iconName,text,label,title,extra={}){
 function slotName(id){const n=/^account-(\d+)$/.exec(id);return id==='default'?'Account 1':n?`Account ${n[1]}`:id}
 function folderOf(p,id){const base=p==='claude'?'~/.claude':'~/.codex';return id==='default'?base:`${base}-${id}`}
 // Same rule as the card: a remembered email only stands in while the status can't be checked; two
-// accounts of a service with one email get their number added.
+// accounts of a service with the same email and plan get their number added (a different plan already tells them apart).
 function accountName(p,a){
   const email=a?.email||(statusOf(a||{})==='unknown'?lastGood[`${p}:${a?.id}`]?.email:null);
   if(!email)return slotName(a?.id||'');
-  const twins=(lastData?.providers?.[p]?.accounts||[]).filter(o=>o.id!==a.id&&(o.email||(statusOf(o)==='unknown'?lastGood[`${p}:${o.id}`]?.email:null))===email);
+  const twins=(lastData?.providers?.[p]?.accounts||[]).filter(o=>o.id!==a.id&&(o.email||(statusOf(o)==='unknown'?lastGood[`${p}:${o.id}`]?.email:null))===email&&(o.plan||null)===(a.plan||null));
   return twins.length?`${email} (${slotName(a.id)})`:email;
 }
 function nameFor(p,id){return accountName(p,(lastData?.providers?.[p]?.accounts||[]).find(a=>a.id===id)||{id})}
+// Bonuses the CLIs report: Codex's free limit resets and Claude Code's dollar credits (such as a cloud-session promotion).
+function shortDate(stamp){return new Date(stamp*1000).toLocaleDateString('en-US',{month:'short',day:'numeric'})}  // English like the rest of the menu
+function extras(a){
+  return (Array.isArray(a.extras)?a.extras:[]).map(x=>{
+    if(x?.kind==='resets'&&Number(x.count)>0){
+      const dates=(x.expires_at||[]).filter(Number.isFinite);
+      const title=`Free resets of the 5-hour and weekly limits from Codex. Use one in Codex when you hit a limit.${dates.length?' Expire: '+dates.map(shortDate).join(', ')+'.':''}`;
+      return `<p class="extra" title="${esc(title)}"><b>${esc(x.count)} free limit reset${x.count>1?'s':''}</b>${dates.length?`<span>· ${x.count>1?'next ':''}expires ${esc(shortDate(dates[0]))}</span>`:''}</p>`;
+    }
+    if(x?.kind==='credit'&&Number(x.remaining)>0){
+      const money=v=>x.currency==='USD'?`$${Math.round(v*100)/100}`:`${Math.round(v*100)/100} ${x.currency||''}`.trim();
+      const title=`Credit Claude Code reports next to your limits (for example a cloud-session promotion): ${money(x.remaining)} of ${money(x.limit)} left.`;
+      return `<p class="extra" title="${esc(title)}"><b>${esc(money(x.remaining))} credit left</b>${Number.isFinite(x.expires_at)?`<span>· expires ${esc(shortDate(x.expires_at))}</span>`:''}</p>`;
+    }
+    return '';
+  }).join('');
+}
 function card(g,a,index){
   const p=g.source,id=a.id,status=statusOf(a),isDefault=id===g.active,count=g.accounts.length;
   const cached=status==='unknown'?lastGood[`${p}:${id}`]:null;
@@ -216,7 +234,7 @@ function card(g,a,index){
     else if(a.login_error)notes+=`<p class="note warn" title="${esc(a.login_error)}">${icon('alert')}<span>Sign-in failed: ${esc(a.login_error)}</span></p>`;
     const select=button('act select','select',p,id,'use','','Use in new terminals',isDefault?'New terminals use this account':`Use ${label} in new terminals`,{pressed:isDefault,disabled:isDefault});
     const again=a.connecting?'Reopen sign-in':'Sign in again';
-    body=`${meters(p,own||cached?.windows,a.source)}${notes}<div class="strip">${select}${button('act login','login',p,id,'login','',again,`${again} to ${label}`)}${hide}</div>`;
+    body=`${meters(p,own||cached?.windows,a.source)}${extras(a)}${notes}<div class="strip">${select}${button('act login','login',p,id,'login','',again,`${again} to ${label}`)}${hide}</div>`;
   }
   return `<section class="card ${esc(p)}" aria-labelledby="${esc(p)}-name ${esc(p)}-account">${head}${identity}${body}</section>`;
 }

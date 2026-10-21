@@ -154,6 +154,24 @@ class ClaudeUsageTests(unittest.TestCase):
             self.assertIsNone(usage._epoch(value))
         self.assertEqual(usage._epoch(12.5), 12.5)
 
+    def test_dollar_credits_are_listed_while_money_is_left(self):
+        now = 1_800_000_000
+        utilization = {"limits": [], "five_hour": {"utilization": 3, "limit_dollars": None},
+                       "promo": {"limit_dollars": 250, "remaining_dollars": 175.5, "resets_at": "2027-06-01T07:59:00+00:00"},
+                       "spent": {"limit_dollars": 100, "remaining_dollars": 0, "resets_at": now + 60},
+                       "expired": {"limit_dollars": 100, "remaining_dollars": 100, "resets_at": now - 60},
+                       "undated": {"limit_dollars": 5, "remaining_dollars": 5},
+                       "odd": "text", "extra_usage": {"is_enabled": False}}
+        with tempfile.TemporaryDirectory() as folder:
+            profile = Path(folder) / ".claude.json"
+            profile.write_text(json.dumps({"cachedUsageUtilization": {"utilization": utilization}}))
+            credits = usage.read_claude_credits(profile, now=now)
+            self.assertEqual(usage.read_claude_credits(Path(folder) / "none.json"), [])
+        self.assertEqual([(c["remaining"], c["limit"]) for c in credits], [(175.5, 250), (5, 5)])
+        self.assertEqual(credits[0]["currency"], "USD")
+        self.assertGreater(credits[0]["expires_at"], now)
+        self.assertIsNone(credits[1]["expires_at"])
+
     def test_missing_caches_read_as_empty(self):
         with tempfile.TemporaryDirectory() as folder:
             self.assertEqual(usage.read_claude_cached(Path(folder) / "none.json"), {})

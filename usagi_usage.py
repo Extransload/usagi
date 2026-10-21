@@ -70,12 +70,8 @@ def read_claude_cached(profile_file=None, now=None):
     Claude Code refreshes it itself; it holds model-scoped weekly limits such as
     Fable that the status-line payload lacks.
     """
-    try:
-        data = json.loads(Path(profile_file or CLAUDE_PROFILE).read_text())
-    except (OSError, ValueError):
-        return {}
-    cached = data.get("cachedUsageUtilization") if isinstance(data, dict) else None
-    if not isinstance(cached, dict) or not isinstance(cached.get("utilization"), dict):
+    cached = _cached_usage(profile_file)
+    if cached is None:
         return {}
     fetched = _number(cached.get("fetchedAtMs"))
     windows = {}
@@ -97,6 +93,33 @@ def read_claude_cached(profile_file=None, now=None):
         if label:
             windows[label] = {"used_percent": used, "resets_at": _epoch(item.get("resets_at"))}
     return _live(windows, fetched / 1000.0 if fetched else None, now)
+
+
+def _cached_usage(profile_file):
+    """cachedUsageUtilization from .claude.json when it has a utilization object, else None."""
+    try:
+        data = json.loads(Path(profile_file or CLAUDE_PROFILE).read_text())
+    except (OSError, ValueError):
+        return None
+    cached = data.get("cachedUsageUtilization") if isinstance(data, dict) else None
+    return cached if isinstance(cached, dict) and isinstance(cached.get("utilization"), dict) else None
+
+
+def read_claude_credits(profile_file=None, now=None):
+    """Dollar credits Claude Code lists next to its limits, such as a promotional cloud-session credit:
+    every utilization entry with a dollar limit that still has money left and hasn't expired."""
+    now = time.time() if now is None else now
+    cached = _cached_usage(profile_file)
+    credits = []
+    for entry in cached["utilization"].values() if cached else ():
+        if not isinstance(entry, dict):
+            continue
+        limit, left = _number(entry.get("limit_dollars")), _number(entry.get("remaining_dollars"))
+        expires = _epoch(entry.get("resets_at"))
+        if limit and left and left > 0 and (expires is None or expires > now):
+            credits.append({"kind": "credit", "remaining": left, "limit": limit, "currency": "USD",
+                            "expires_at": expires})
+    return sorted(credits, key=lambda credit: credit["expires_at"] or float("inf"))
 
 
 def claude_cache_for(profile):

@@ -64,8 +64,8 @@ Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the C
 
 ## What Usagi reads
 
-- **Claude**: the usage cache Claude Code keeps in `~/.claude.json` (`~/.claude-<name>/.claude.json` for extra accounts). Only percentages and reset times are read. Claude Code refreshes that cache itself, so a reading can be hours old; Usagi marks a 5-hour reading older than 30 minutes, or any other reading older than 3 hours, as possibly out of date. Sign-in state comes from `claude auth status`.
-- **Codex**: Usagi asks the Codex CLI's official app-server (`codex app-server`) for the account and its limits. Limits are named by the period Codex reports (Team: 5-hour and weekly, Free: 30-day, and so on).
+- **Claude**: the usage cache Claude Code keeps in `~/.claude.json` (`~/.claude-<name>/.claude.json` for extra accounts). Only percentages and reset times are read. Claude Code refreshes that cache itself, so a reading can be hours old; Usagi marks a 5-hour reading older than 30 minutes, or any other reading older than 3 hours, as possibly out of date. Dollar credits listed in the same cache, such as the cloud-session credit for Max and Pro, are shown with what's left and when they expire. Sign-in state comes from `claude auth status`.
+- **Codex**: Usagi asks the Codex CLI's official app-server (`codex app-server`) for the account and its limits. Limits are named by the period Codex reports (Team: 5-hour and weekly, Free: 30-day, and so on). Free limit resets Codex granted you are listed on the card with their expiry dates.
 - Usagi never reads or copies sign-in tokens. Sign-in uses `claude auth login` and the Codex app-server's own sign-in.
 - **Icons**: card and menu bar icons come from the Claude and ChatGPT apps when they are installed. If the Claude app isn't installed, Usagi downloads Claude's icon from claude.ai (PNG only, at most 1 MB, again after 30 days) and keeps it in `~/.config/usagi/icons`. Without either, Usagi shows plain C and X badges.
 - **Network**: apart from the CLIs it runs, Usagi itself only contacts `api.github.com` for the update check and claude.ai for that icon.
@@ -102,7 +102,7 @@ Checked on the developer's Mac on 2026-10-21.
 
 Checked:
 
-- 97 Python tests, 184 Swift checks, and 242 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
+- 99 Python tests, 184 Swift checks, and 252 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
 - Reading Claude Max 20x, Codex Team and Codex Free accounts with the short `PATH` an app opened from Finder gets
 - A CLI installed the npm way (a `#!/usr/bin/env node` script next to its own `node` under `~/.nvm`, simulated with a stand-in CLI) found and run without Node on `PATH`
 - Starting with an empty home folder: no cards, an onboarding card, and the bridge's answers for signed-out and missing CLIs
