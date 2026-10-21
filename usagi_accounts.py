@@ -4,27 +4,61 @@ Claude Code keeps a separate login, history and settings per
 CLAUDE_CONFIG_DIR, and Codex per CODEX_HOME. A profile named "work" is the
 pair ~/.claude-work and ~/.codex-work; "default" is the plain ~/.claude and
 ~/.codex. Shared configuration is symlinked into each new profile while logins
-and histories stay apart. Agent Kit uses the same layout; when it is installed
-its state folder and profile marker are shared. Nothing here reads or copies a
-login token.
+and histories stay apart, except a Claude settings.json that signs in by
+itself. Agent Kit uses the same layout; when it is installed its state folder
+is shared, and new profiles always carry its marker too. Nothing here reads or
+copies a login token.
 """
+import contextlib
 import json
+import os
 from pathlib import Path
 import re
+import tempfile
 
 HOME = Path.home()
 AGENTKIT = HOME / ".config/iterm2/agentkit"
 STATE = AGENTKIT / "state" if AGENTKIT.is_dir() else HOME / ".config/usagi/state"
 PROVIDERS = ("claude", "codex")
-NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,30}$")
+NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,30}")  # use fullmatch: match() with $ accepts "work\n"
 MARKERS = (".usagi-profile", ".agentkit-profile")
 SHARED_CLAUDE = ("settings.json", "CLAUDE.md", "CLAUDE-omc.md", "hooks", "skills", "plugins",
                  "statusline", "agents", "commands", "keybindings.json", "output-styles")
 SHARED_CODEX = ("config.toml", "hooks.json", "AGENTS.md", "skills", "agents", "rules", "prompts")
+CREDENTIAL_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
 
 
 class AccountError(Exception):
     pass
+
+
+def private_dir(path):
+    """mkdir -p, but every folder it creates is 0700 (parents=True would make them 0755)."""
+    path = Path(path)
+    if not path.is_dir():
+        private_dir(path.parent)
+        with contextlib.suppress(FileExistsError):
+            path.mkdir(mode=0o700)
+    return path
+
+
+def write_private(path, text):
+    """Replaces the file atomically with one only the user can read."""
+    private_dir(path.parent)
+    fd, temp = tempfile.mkstemp(dir=str(path.parent), prefix="." + path.name + ".")
+    try:
+        with os.fdopen(fd, "w") as file:
+            file.write(text)
+        os.replace(temp, str(path))
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp)
+        raise
+
+
+def sort_key(name):
+    """default first, then natural order: account-2 before account-10."""
+    return name != "default", [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
 
 
 def dirs(name):
@@ -34,7 +68,7 @@ def dirs(name):
 
 
 def check_name(name):
-    if name == "default" or not NAME.match(name or ""):
+    if name == "default" or not isinstance(name, str) or not NAME.fullmatch(name):
         raise AccountError("Use lowercase letters, digits and -; 'default' is reserved: %r" % name)
 
 
@@ -50,14 +84,14 @@ def is_profile(folder):
 def profiles(provider=None):
     """Registered names; provider views include accounts made for only that CLI."""
     check_provider(provider)
-    names = ["default"]
+    names = []
     prefix = ".codex-" if provider == "codex" else ".claude-"
-    for path in sorted(HOME.glob(prefix + "*")):
+    for path in HOME.glob(prefix + "*"):
         name = path.name[len(prefix):]
         legacy_codex = provider == "codex" and is_profile(HOME / (".claude-" + name))
-        if NAME.match(name) and (is_profile(path) or legacy_codex):
+        if NAME.fullmatch(name) and (is_profile(path) or legacy_codex):
             names.append(name)
-    return names
+    return ["default"] + sorted(names, key=sort_key)
 
 
 def active(provider=None):
@@ -71,10 +105,7 @@ def active(provider=None):
 
 
 def _write_active(path, name):
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temp = path.with_name(path.name + ".tmp")
-    temp.write_text(name + "\n")
-    temp.replace(path)
+    write_private(path, name + "\n")
 
 
 def use(name, provider=None):
@@ -100,22 +131,41 @@ def _link_shared(source_root, target_root, names):
     return linked
 
 
+def _signs_in(settings):
+    """A Claude settings file with its own credentials (apiKeyHelper, or a token in env) would sign
+    every profile into the same account. One that can't be read is treated the same way."""
+    try:
+        data = json.loads(settings.read_text())
+    except (OSError, ValueError):
+        return True
+    if not isinstance(data, dict):
+        return True
+    env = data.get("env")
+    return "apiKeyHelper" in data or (isinstance(env, dict) and any(key in env for key in CREDENTIAL_ENV))
+
+
 def add(name, provider=None):
+    """Creates the profile folders. Returns them, the shared items linked per CLI, and the items
+    not shared because they carry credentials."""
     check_name(name)
     check_provider(provider)
     claude, codex = dirs(name)
     selected = ((claude, codex) if provider is None else
                 (claude,) if provider == "claude" else (codex,))
-    markers = MARKERS if AGENTKIT.is_dir() else MARKERS[:1]
     for folder in selected:
         folder.mkdir(mode=0o700, exist_ok=True)
-        for marker in markers:
-            (folder / marker).write_text("Created by Usagi; safe to keep.\n")
-    linked = {"claude": _link_shared(HOME / ".claude", claude, SHARED_CLAUDE)
+        for marker in MARKERS:  # both, so Agent Kit installed later sees the profile too
+            if not (folder / marker).exists():
+                write_private(folder / marker, "Created by Usagi; safe to keep.\n")
+    shared, skipped = SHARED_CLAUDE, []
+    settings = HOME / ".claude/settings.json"
+    if claude in selected and settings.exists() and _signs_in(settings):
+        shared, skipped = tuple(item for item in SHARED_CLAUDE if item != "settings.json"), ["settings.json"]
+    linked = {"claude": _link_shared(HOME / ".claude", claude, shared)
               if claude in selected else [],
               "codex": _link_shared(HOME / ".codex", codex, SHARED_CODEX)
               if codex in selected else []}
-    return claude, codex, linked
+    return claude, codex, linked, skipped
 
 
 def account_info(name):

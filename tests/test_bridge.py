@@ -1,177 +1,154 @@
-import os
-import sys
+import contextlib
 import io
+import json
+import os
 from pathlib import Path
-import tempfile
+import plistlib
+import signal
+import subprocess
 import time
 import unittest
 from unittest import mock
 
 import bridge
+from helpers import IsolatedTest, PYTHON, ROOT
 
 
-class SignInTests(unittest.TestCase):
+class StatusTests(IsolatedTest):
+    def setUp(self):
+        super().setUp()
+        self.claude = self.fake_cli("claude", "")
+        self.codex = self.fake_cli("codex", "")
+
     def test_default_claude_uses_cli_login_without_overriding_config_dir(self):
-        completed = mock.Mock(returncode=0, stdout='{"loggedIn": true}')
-        with mock.patch.dict(os.environ, {
-            "ANTHROPIC_API_KEY": "placeholder",
-            "CLAUDE_CONFIG_DIR": "/tmp/wrong-profile",
-        }), mock.patch.object(bridge.subprocess, "run", return_value=completed) as run:
-            self.assertTrue(bridge.signed_in("claude", "default", Path("/tmp/default"), Path("/tmp/codex")))
-        args, kwargs = run.call_args
-        self.assertEqual(args[0][1:], ["auth", "status", "--json"])
-        self.assertNotIn("ANTHROPIC_API_KEY", kwargs["env"])
-        self.assertNotIn("CLAUDE_CONFIG_DIR", kwargs["env"])
+        os.environ.update(ANTHROPIC_API_KEY="placeholder", CLAUDE_CONFIG_DIR="/tmp/wrong-profile")
+        with mock.patch.object(bridge, "run", return_value=(0, '{"loggedIn": true}')) as run:
+            self.assertEqual(bridge.cli_status("claude", "default"), "signed_in")
+        command, env, _ = run.call_args.args
+        self.assertEqual(command, [str(self.claude), "auth", "status", "--json"])
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
+        self.assertNotIn("CLAUDE_CONFIG_DIR", env)
 
     def test_named_account_checks_its_own_config_dir(self):
-        completed = mock.Mock(returncode=0, stdout='{"loggedIn": true}')
-        with mock.patch.object(bridge.subprocess, "run", return_value=completed) as run:
-            self.assertTrue(bridge.signed_in("claude", "work", Path("/tmp/claude-work"), Path("/tmp/codex-work")))
-        self.assertEqual(run.call_args.kwargs["env"]["CLAUDE_CONFIG_DIR"], "/tmp/claude-work")
+        with mock.patch.object(bridge, "run", return_value=(0, '{"loggedIn": true}')) as run:
+            self.assertEqual(bridge.cli_status("claude", "work"), "signed_in")
+        self.assertEqual(run.call_args.args[1]["CLAUDE_CONFIG_DIR"], str(self.home / ".claude-work"))
 
-    def test_codex_status_failure_is_logged_out(self):
-        completed = mock.Mock(returncode=1, stdout="Not logged in")
-        with mock.patch.object(bridge.subprocess, "run", return_value=completed) as run:
-            self.assertFalse(bridge.signed_in("codex", "default", Path("/tmp/claude"), Path("/tmp/codex")))
-        self.assertNotIn("CODEX_HOME", run.call_args.kwargs["env"])
+    def test_claude_answers_map_to_status(self):
+        for answer, expected in (((1, '{"loggedIn": false}'), "signed_out"),
+                                 ((0, '{"loggedIn": true}'), "signed_in"),
+                                 ((1, '{"loggedIn": true}'), "unknown"),
+                                 ((127, "env: node: No such file or directory"), "unknown"),
+                                 ((0, "[]"), "unknown"),
+                                 (None, "unknown")):  # timed out or could not start
+            with mock.patch.object(bridge, "run", return_value=answer):
+                self.assertEqual(bridge.cli_status("claude", "default"), expected, answer)
 
-    def test_sign_in_starts_app_worker_without_iterm(self):
-        worker = mock.Mock()
-        worker.stdout = io.StringIO('{"ready": true}\n')
-        worker.poll.return_value = None
-        with mock.patch.object(bridge.accounts, "profiles", return_value=["default", "work"]), \
-             mock.patch.object(bridge, "is_connecting", return_value=False), \
-             mock.patch.object(bridge.subprocess, "Popen", return_value=worker) as launch, \
-             mock.patch.object(bridge.selectors, "DefaultSelector") as selector:
-            selector.return_value.select.return_value = [(None, None)]
-            bridge.login("codex", "work")
-        command = launch.call_args.args[0]
-        self.assertEqual(command[-3:], ["login_worker", "codex", "work"])
-        self.assertTrue(launch.call_args.kwargs["start_new_session"])
+    def test_codex_login_status_maps_exit_codes(self):
+        for answer, expected in (((0, ""), "signed_in"), ((1, ""), "signed_out"),
+                                 ((-9, ""), "unknown"), (None, "unknown")):
+            with mock.patch.object(bridge, "run", return_value=answer) as run:
+                self.assertEqual(bridge.cli_status("codex", "default"), expected)
+            self.assertNotIn("CODEX_HOME", run.call_args.args[1])
 
-    def test_sign_in_failure_is_not_reported_as_success(self):
-        worker = mock.Mock()
-        worker.stdout = io.StringIO('{"error": "Could not open the sign-in page"}\n')
-        worker.poll.return_value = 1
-        with mock.patch.object(bridge.accounts, "profiles", return_value=["default"]), \
-             mock.patch.object(bridge, "is_connecting", return_value=False), \
-             mock.patch.object(bridge.subprocess, "Popen", return_value=worker), \
-             mock.patch.object(bridge.selectors, "DefaultSelector") as selector:
-            selector.return_value.select.return_value = [(None, None)]
-            with self.assertRaisesRegex(RuntimeError, "Could not open the sign-in page"):
-                bridge.login("claude", "default")
+    def test_missing_cli_is_its_own_status(self):
+        self.claude.unlink()
+        self.codex.unlink()
+        with mock.patch.object(bridge, "run") as run:
+            self.assertEqual(bridge.cli_status("claude", "default"), "cli_missing")
+            self.assertEqual(bridge.codex_live("default"), {"status": "cli_missing"})
+        run.assert_not_called()
 
-    def test_retry_stops_existing_login_before_opening_new_one(self):
-        worker = mock.Mock()
-        worker.stdout = io.StringIO('{"ready": true}\n')
-        worker.poll.return_value = None
-        with tempfile.TemporaryDirectory() as folder, \
-             mock.patch.object(bridge, "LOGIN_DIR", Path(folder)), \
-             mock.patch.object(bridge.accounts, "profiles", return_value=["default"]), \
-             mock.patch.object(bridge.os, "getpgid", return_value=123), \
-             mock.patch.object(bridge.os, "killpg") as stop, \
-             mock.patch.object(bridge.os, "kill", side_effect=ProcessLookupError), \
-             mock.patch.object(bridge.subprocess, "Popen", return_value=worker) as launch, \
-             mock.patch.object(bridge.selectors, "DefaultSelector") as selector:
-            path = bridge.login_file("claude", "default")
-            path.write_text("123")
-            selector.return_value.select.return_value = [(None, None)]
-            with mock.patch.object(bridge, "is_connecting", return_value=True):
-                bridge.login("claude", "default")
-            self.assertFalse(path.exists())
-        stop.assert_called_once_with(123, bridge.signal.SIGTERM)
-        launch.assert_called_once()
 
-    def test_worker_keeps_selected_profile_and_opens_browser(self):
-        with tempfile.TemporaryDirectory() as folder, \
-             mock.patch.object(bridge, "LOGIN_DIR", Path(folder)), \
-             mock.patch.object(bridge.accounts, "profiles", return_value=["work"]), \
-             mock.patch.object(bridge.accounts, "dirs", return_value=(Path("/tmp/claude-work"), Path("/tmp/codex-work"))), \
-             mock.patch.object(bridge, "codex_login_worker") as worker:
-            bridge.login_worker("codex", "work")
-        self.assertEqual(worker.call_args.args[1]["CODEX_HOME"], "/tmp/codex-work")
-        with mock.patch.object(bridge.subprocess, "run", return_value=mock.Mock(returncode=0)) as run:
-            bridge.open_browser("https://auth.openai.com/example")
-        self.assertEqual(run.call_args_list[0].args[0][:4],
-                         ["/usr/bin/open", "-a", "Google Chrome", "https://auth.openai.com/example"])
+class SnapshotTests(IsolatedTest):
+    def setUp(self):
+        super().setUp()
+        self.fake_cli("claude", "")
+        self.fake_cli("codex", "")
+        for name in ("work", "account-2", "account-10"):
+            for prefix in (".claude-", ".codex-"):
+                (self.home / (prefix + name)).mkdir()
+                (self.home / (prefix + name) / ".usagi-profile").write_text("")
 
-    def test_browser_falls_back_to_default_when_chrome_is_missing(self):
-        results = [mock.Mock(returncode=1), mock.Mock(returncode=0)]
-        with mock.patch.object(bridge.subprocess, "run", side_effect=results) as run:
-            bridge.open_browser("https://auth.openai.com/example")
-        self.assertEqual(run.call_args_list[1].args[0], ["/usr/bin/open", "https://auth.openai.com/example"])
-        self.assertEqual(run.call_count, 2)
-
-    def test_cards_can_be_added_and_removed_without_touching_cli_login(self):
-        with tempfile.TemporaryDirectory() as folder, \
-             mock.patch.object(bridge, "CARD_FILE", Path(folder) / "cards.json"), \
-             mock.patch.object(bridge, "signed_in", return_value=False), \
-             mock.patch.object(bridge.accounts, "profiles", return_value=["default"]), \
-             mock.patch.object(bridge.accounts, "active", return_value="default"), \
-             mock.patch.object(bridge.accounts, "add") as add:
-            bridge.add_card("codex", "default")
-            self.assertEqual(bridge.visible_cards(), [{"provider": "codex", "id": "default"}])
-        add.assert_not_called()
-
-    def test_default_card_removal_preserves_cli_profile(self):
-        with tempfile.TemporaryDirectory() as folder, \
-             mock.patch.object(bridge, "CARD_FILE", Path(folder) / "cards.json"), \
-             mock.patch.object(bridge.accounts, "profiles", return_value=["default"]), \
-             mock.patch.object(bridge.accounts, "use") as use, \
-             mock.patch.object(bridge.accounts, "add") as add:
-            bridge.save_cards([{"provider": "codex", "id": "default"}])
-            bridge.remove_card("codex", "default")
-            self.assertEqual(bridge.visible_cards(), [])
-        use.assert_not_called()
-        add.assert_not_called()
-
-    def test_multiple_cards_for_one_provider_are_preserved(self):
-        cards = [{"provider": "claude", "id": "default"},
-                 {"provider": "claude", "id": "work"},
+    def test_cards_are_preserved_and_accounts_listed_in_natural_order(self):
+        cards = [{"provider": "claude", "id": "account-10"}, {"provider": "claude", "id": "work"},
+                 {"provider": "claude", "id": "account-2"}, {"provider": "claude", "id": "default"},
                  {"provider": "codex", "id": "default"}]
-        with tempfile.TemporaryDirectory() as folder, \
-             mock.patch.object(bridge, "CARD_FILE", Path(folder) / "cards.json"), \
-             mock.patch.object(bridge.accounts, "profiles", return_value=["default", "work"]), \
-             mock.patch.object(bridge.accounts, "active", return_value="default"), \
-             mock.patch.object(bridge.accounts, "dirs", return_value=(Path("/tmp/claude"), Path("/tmp/codex"))), \
-             mock.patch.object(bridge, "signed_in", return_value=False):
-            bridge.save_cards(cards)
+        bridge.save_cards(cards)
+        with mock.patch.object(bridge, "check_account", return_value={"status": "signed_out"}):
             result = bridge.snapshot()
         self.assertEqual(result["cards"], cards)
-        self.assertEqual(len(result["providers"]["claude"]["accounts"]), 2)
+        self.assertEqual([account["id"] for account in result["providers"]["claude"]["accounts"]],
+                         ["default", "account-2", "account-10", "work"])
+        account = result["providers"]["codex"]["accounts"][0]
+        self.assertEqual((account["status"], account["logged_in"], account["connecting"]), ("signed_out", False, False))
+        self.assertEqual(result["providers"]["claude"]["active"], "default")
 
-    def test_provider_tile_reuses_hidden_default_without_opening_login(self):
-        with mock.patch.object(bridge, "visible_cards", return_value=[]), \
-             mock.patch.object(bridge.accounts, "profiles", return_value=["default"]), \
-             mock.patch.object(bridge, "add_card") as add, \
-             mock.patch.object(bridge.accounts, "use") as use, \
-             mock.patch.object(bridge.accounts, "dirs", return_value=(Path("/tmp/claude"), Path("/tmp/codex"))), \
-             mock.patch.object(bridge, "signed_in", return_value=False), \
-             mock.patch.object(bridge, "login") as login:
-            self.assertEqual(bridge.add_next_card("claude"), "default")
-        add.assert_called_once_with("claude", "default")
-        use.assert_not_called()
-        login.assert_not_called()
+    def test_snapshot_reports_cli_and_version(self):
+        (self.home / ".local/bin/codex").unlink()
+        plist = bridge.APP_PATH / "Contents/Info.plist"
+        plist.parent.mkdir(parents=True)
+        plist.write_bytes(plistlib.dumps({"CFBundleShortVersionString": "9.8.7"}))
+        bridge.save_cards([{"provider": "codex", "id": "default"}])
+        result = bridge.snapshot()
+        self.assertEqual(result["version"], "9.8.7")
+        self.assertEqual((result["providers"]["claude"]["cli"], result["providers"]["codex"]["cli"]), (True, False))
+        self.assertEqual(result["providers"]["codex"]["accounts"][0]["status"], "cli_missing")
+        self.assertFalse(result["providers"]["codex"]["accounts"][0]["logged_in"])
 
-    def test_provider_tile_creates_next_profile_when_all_are_shown(self):
-        with mock.patch.object(bridge, "visible_cards", return_value=[{"provider": "codex", "id": "default"}]), \
-             mock.patch.object(bridge.accounts, "profiles", return_value=["default"]), \
-             mock.patch.object(bridge, "add_card") as add, \
-             mock.patch.object(bridge.accounts, "use") as use, \
-             mock.patch.object(bridge.accounts, "dirs", return_value=(Path("/tmp/claude"), Path("/tmp/codex"))), \
-             mock.patch.object(bridge, "signed_in", return_value=False), \
-             mock.patch.object(bridge, "login") as login:
-            self.assertEqual(bridge.add_next_card("codex"), "account-2")
-        add.assert_called_once_with("codex", "account-2")
-        use.assert_not_called()
-        login.assert_not_called()
+    def test_version_falls_back_to_the_source_tree_info_plist(self):
+        with open(ROOT / "Info.plist", "rb") as file:
+            expected = plistlib.load(file)["CFBundleShortVersionString"]
+        self.assertEqual(bridge.app_version(), expected)
+
+    def test_one_failing_account_does_not_hide_the_others(self):
+        bridge.save_cards([{"provider": "codex", "id": "default"}, {"provider": "codex", "id": "work"},
+                           {"provider": "claude", "id": "default"}])
+
+        def live(name):
+            if name == "work":
+                raise AttributeError("'list' object has no attribute 'get'")
+            return {"status": "signed_in", "email": "a@example.com", "windows": {}}
+
+        with mock.patch.object(bridge, "codex_live", side_effect=live), \
+             mock.patch.object(bridge, "cli_status", return_value="signed_in"), \
+             mock.patch.object(bridge.readers, "read_claude_cached", side_effect=ValueError("broken")):
+            result = bridge.snapshot()
+        codex = {account["id"]: account for account in result["providers"]["codex"]["accounts"]}
+        self.assertEqual(codex["default"]["status"], "signed_in")
+        self.assertEqual(codex["default"]["email"], "a@example.com")
+        self.assertEqual(codex["work"]["status"], "unknown")
+        self.assertFalse(codex["work"]["logged_in"])
+        self.assertEqual(result["providers"]["claude"]["accounts"][0]["status"], "unknown")
+
+    def test_first_run_checks_each_account_once_and_concurrently(self):
+        calls = []
+
+        def check(provider, name):
+            calls.append((provider, name))
+            time.sleep(0.3)
+            return {"status": "signed_in"}
+
+        with mock.patch.object(bridge, "check_account", side_effect=check):
+            started = time.monotonic()
+            result = bridge.snapshot()
+            elapsed = time.monotonic() - started
+        self.assertEqual(sorted(calls), [("claude", "default"), ("codex", "default")])
+        self.assertEqual(result["cards"], [{"provider": "claude", "id": "default"}, {"provider": "codex", "id": "default"}])
+        self.assertLess(elapsed, 0.55)
+
+    def test_accounts_are_checked_concurrently(self):
+        bridge.save_cards([{"provider": provider, "id": name} for provider in ("claude", "codex")
+                           for name in ("default", "work")])
+        with mock.patch.object(bridge, "check_account",
+                               side_effect=lambda *_: time.sleep(0.3) or {"status": "signed_out"}):
+            started = time.monotonic()
+            bridge.snapshot()
+        self.assertLess(time.monotonic() - started, 0.55)
 
     def test_logged_out_account_never_exposes_cached_usage(self):
-        with mock.patch.object(bridge.accounts, "PROVIDERS", ("claude",)), \
-             mock.patch.object(bridge, "visible_cards", return_value=[{"provider": "claude", "id": "default"}]), \
-             mock.patch.object(bridge.accounts, "active", return_value="default"), \
-             mock.patch.object(bridge.accounts, "dirs", return_value=(Path("/tmp/claude"), Path("/tmp/codex"))), \
-             mock.patch.object(bridge, "signed_in", return_value=False), \
+        bridge.save_cards([{"provider": "claude", "id": "default"}])
+        with mock.patch.object(bridge, "cli_status", return_value="signed_out"), \
              mock.patch.object(bridge.readers, "read_claude_cached") as cached:
             account = bridge.snapshot()["providers"]["claude"]["accounts"][0]
         self.assertEqual(account["windows"], {})
@@ -179,90 +156,137 @@ class SignInTests(unittest.TestCase):
         self.assertIsNone(account["email"])
         cached.assert_not_called()
 
+    def test_signed_in_claude_reads_its_cache_with_staleness(self):
+        now = time.time()
+        (self.home / ".claude.json").write_text(json.dumps({
+            "oauthAccount": {"emailAddress": "c@example.com", "organizationRateLimitTier": "default_claude_max_20x"},
+            "cachedUsageUtilization": {"fetchedAtMs": (now - 3600) * 1000, "utilization": {"limits": [
+                {"kind": "session", "percent": 13, "resets_at": now + 3600},
+                {"kind": "weekly_all", "percent": 16, "resets_at": now + 86400}]}}}))
+        bridge.save_cards([{"provider": "claude", "id": "default"}])
+        with mock.patch.object(bridge, "cli_status", return_value="signed_in"):
+            account = bridge.snapshot()["providers"]["claude"]["accounts"][0]
+        self.assertEqual((account["email"], account["plan"]), ("c@example.com", "Max 20x"))
+        self.assertTrue(account["windows"]["5h"]["stale"])
+        self.assertFalse(account["windows"]["7d"]["stale"])
 
-FAKE_CODEX = '''#!{python}
-import json, os, sys
+    def test_login_error_is_cleared_once_signed_in(self):
+        bridge.save_cards([{"provider": "codex", "id": "work"}, {"provider": "codex", "id": "default"}])
+        for name in ("work", "default"):
+            bridge.accounts.write_private(bridge.login_error_file("codex", name), "Token exchange failed")
+        statuses = {"work": "signed_in", "default": "signed_out"}
+        with mock.patch.object(bridge, "codex_live", side_effect=lambda name: {"status": statuses[name]}):
+            accounts = {account["id"]: account for account in bridge.snapshot()["providers"]["codex"]["accounts"]}
+        self.assertIsNone(accounts["work"]["login_error"])
+        self.assertFalse(bridge.login_error_file("codex", "work").exists())
+        self.assertEqual(accounts["default"]["login_error"], "Token exchange failed")
+
+    def test_cards_can_be_added_and_removed_without_touching_cli_login(self):
+        with mock.patch.object(bridge.accounts, "add") as add:
+            bridge.add_card("codex", "default")
+            self.assertEqual(bridge.visible_cards(), [{"provider": "codex", "id": "default"}])
+            bridge.remove_card("codex", "default")
+            self.assertEqual(bridge.visible_cards(), [])
+        add.assert_not_called()
+
+    def test_provider_tile_reuses_hidden_profile_then_creates_the_next_one(self):
+        bridge.save_cards([])
+        self.assertEqual(bridge.add_next_card("claude"), "default")
+        self.assertEqual(bridge.add_next_card("claude"), "account-2")
+        self.assertEqual(bridge.add_next_card("claude"), "account-10")
+        self.assertEqual(bridge.add_next_card("claude"), "work")
+        self.assertEqual(bridge.add_next_card("claude"), "account-3")
+        self.assertTrue((self.home / ".claude-account-3/.usagi-profile").exists())
+
+    def test_add_auto_reports_the_added_account_and_add_is_gone(self):
+        bridge.save_cards([{"provider": "codex", "id": "default"}])
+        output = io.StringIO()
+        with mock.patch.object(bridge, "check_account", return_value={"status": "signed_out"}), \
+             contextlib.redirect_stdout(output):
+            bridge.main(["add_auto", "codex"])
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["added"], "account-2")
+        self.assertIn({"provider": "codex", "id": "account-2"}, result["cards"])
+        with self.assertRaisesRegex(ValueError, "Invalid command"):
+            bridge.main(["add", "codex", "work"])
+
+    def test_errors_carry_an_optional_code(self):
+        self.assertEqual(bridge.error_output(bridge.CliMissing("codex")),
+                         {"error": "Codex CLI not found. Install it, then try again.", "code": "cli_missing"})
+        self.assertEqual(bridge.error_output(ValueError("Invalid command")), {"error": "Invalid command"})
+
+
+FAKE_LIVE_CODEX = '''
+import json, sys, time
+def out(text):
+    sys.stdout.write(text)
+    sys.stdout.flush()
 for line in sys.stdin:
     message = json.loads(line)
     if message.get("id") == 1:
-        print(json.dumps({{"id": 1, "result": {{}}}}), flush=True)
-    elif message.get("id") == 2:
-        print(json.dumps({{"id": 2, "result": {{"type": "chatgpt", "authUrl": "https://auth.openai.com/x"}}}}), flush=True)
-        if os.environ["FAKE_MODE"] == "fail":
-            print(json.dumps({{"method": "account/login/completed",
-                              "params": {{"success": False, "error": "Token exchange failed: 401"}}}}), flush=True)
-'''
-
-
-class LoginResultTests(unittest.TestCase):
-    def run_codex_worker(self, folder, mode):
-        fake = Path(folder) / "codex"
-        fake.write_text(FAKE_CODEX.format(python=sys.executable))
-        fake.chmod(0o755)
-        with mock.patch.object(bridge, "LOGIN_DIR", Path(folder) / "logins"), \
-             mock.patch.object(bridge, "LOGIN_TIMEOUT", 1), \
-             mock.patch.object(bridge.accounts, "profiles", return_value=["work"]), \
-             mock.patch.object(bridge.accounts, "dirs", return_value=(Path(folder), Path(folder))), \
-             mock.patch.object(bridge, "auth_context", return_value=(str(fake), dict(os.environ, FAKE_MODE=mode))), \
-             mock.patch.object(bridge, "open_browser"), \
-             mock.patch.object(bridge, "login_ready"):
-            with self.assertRaises(RuntimeError) as raised:
-                bridge.login_worker("codex", "work")
-            return str(raised.exception), bridge.login_error("codex", "work")
-
-    def test_failed_codex_login_is_recorded_for_the_card(self):
-        with tempfile.TemporaryDirectory() as folder:
-            message, recorded = self.run_codex_worker(folder, "fail")
-        self.assertIn("Token exchange failed: 401", message)
-        self.assertEqual(recorded, message)
-
-    def test_codex_login_timeout_is_recorded_for_the_card(self):
-        with tempfile.TemporaryDirectory() as folder:
-            message, recorded = self.run_codex_worker(folder, "hang")
-        self.assertIn("timed out", message)
-        self.assertEqual(recorded, message)
-
-    def test_new_login_clears_previous_failure(self):
-        worker = mock.Mock()
-        worker.stdout = io.StringIO('{"ready": true}\n')
-        worker.poll.return_value = None
-        with tempfile.TemporaryDirectory() as folder, \
-             mock.patch.object(bridge, "LOGIN_DIR", Path(folder)), \
-             mock.patch.object(bridge.accounts, "profiles", return_value=["work"]), \
-             mock.patch.object(bridge, "is_connecting", return_value=False), \
-             mock.patch.object(bridge.subprocess, "Popen", return_value=worker), \
-             mock.patch.object(bridge.selectors, "DefaultSelector") as selector:
-            selector.return_value.select.return_value = [(None, None)]
-            bridge.login_error_file("codex", "work").write_text("previous failure")
-            bridge.login("codex", "work")
-            self.assertIsNone(bridge.login_error("codex", "work"))
-
-
-FAKE_LIVE_CODEX = '''#!{python}
-import json, sys
-for line in sys.stdin:
-    message = json.loads(line)
-    if message.get("id") == 1:
-        print(json.dumps({{"id": 1, "result": {{}}}}), flush=True)
+        out('[1, 2]\\n"text"\\n42\\nnull\\nnot json\\n')
+        out(json.dumps({"id": 1, "result": {}}) + "\\n")
     elif message.get("id") == 3:
-        account = {{"id": 2, "result": {{"account": {{"type": "chatgpt", "email": "a@example.com", "planType": "team"}}}}}}
-        limits = {{"id": 3, "result": {{"rateLimits": {{"primary": {{"usedPercent": 40, "windowDurationMins": 300}}}}}}}}
-        sys.stdout.write(json.dumps(account) + "\\n" + json.dumps(limits) + "\\n")
-        sys.stdout.flush()
+        out(json.dumps({"id": 2, "method": "item/commandExecution/requestApproval", "params": {}}) + "\\n")
+        out(json.dumps({"method": "remoteControl/status/changed", "params": {}}) + "\\n")
+        out(json.dumps({"id": [2], "result": {}}) + "\\n")
+        account = json.dumps({"id": 2, "result": {"account": %s}})
+        out(account[:15])
+        time.sleep(0.2)
+        out(account[15:] + "\\n" + json.dumps({"id": 3, "result": {"rateLimits": %s}}) + "\\n")
 '''
 
 
-class CodexWindowTests(unittest.TestCase):
-    def test_live_read_handles_responses_arriving_in_one_chunk(self):
-        with tempfile.TemporaryDirectory() as folder:
-            fake = Path(folder) / "codex"
-            fake.write_text(FAKE_LIVE_CODEX.format(python=sys.executable))
-            fake.chmod(0o755)
-            with mock.patch.object(bridge, "auth_context", return_value=(str(fake), dict(os.environ))):
-                started = time.monotonic()
-                info = bridge.codex_live("default", Path(folder), Path(folder))
+class CodexLiveTests(IsolatedTest):
+    def live(self, account, limits='{"primary": {"usedPercent": 40, "windowDurationMins": 300}}'):
+        self.fake_cli("codex", FAKE_LIVE_CODEX % (account, limits))
+        return bridge.codex_live("default")
+
+    def test_noise_server_requests_and_split_lines_are_handled(self):
+        info = self.live('{"type": "chatgpt", "email": "a@example.com", "planType": "team"}')
+        self.assertEqual((info["status"], info["email"], info["plan"]), ("signed_in", "a@example.com", "team"))
         self.assertEqual(info["windows"]["5h"]["used_percent"], 40)
-        self.assertLess(time.monotonic() - started, 4)
+        self.assertFalse(info["windows"]["5h"]["stale"])
+
+    def test_signed_out_and_api_key_accounts(self):
+        self.assertEqual(self.live("None"), {"status": "signed_out"})
+        self.assertEqual(self.live('{"type": "apiKey"}'), {"status": "signed_in"})
+        self.assertEqual(self.live("[]"), {"status": "unknown"})
+
+    def test_malformed_limits_are_ignored(self):
+        info = self.live('{"type": "chatgpt", "email": 7}', limits='{"primary": [1], "secondary": "x"}')
+        self.assertEqual((info["status"], info["email"], info["windows"]), ("signed_in", None, {}))
+        info = self.live('{"type": "chatgpt"}', limits="[]")
+        self.assertEqual(info["windows"], {})
+
+    def test_partial_line_never_completed_respects_the_deadline(self):
+        self.fake_cli("codex", '''
+import json, sys, time
+for line in sys.stdin:
+    if json.loads(line).get("id") == 1:
+        sys.stdout.write('{"id": 1, "res')
+        sys.stdout.flush()
+        time.sleep(30)
+''')
+        with mock.patch.object(bridge, "APP_SERVER_TIMEOUT", 0.5):
+            started = time.monotonic()
+            self.assertEqual(bridge.codex_live("default"), {"status": "unknown"})
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_app_server_process_group_is_stopped(self):
+        self.fake_cli("codex", '''
+import subprocess, sys, time
+child = subprocess.Popen(["/bin/sleep", "30"])
+open(sys.argv[0] + ".pid", "w").write(str(child.pid))
+time.sleep(30)
+''')
+        pid_file = Path(str(self.home / ".local/bin/codex") + ".pid")
+        with mock.patch.object(bridge, "APP_SERVER_TIMEOUT", 0.5):
+            self.assertEqual(bridge.codex_live("default"), {"status": "unknown"})
+        pid = int(pid_file.read_text())
+        self.kill_later(pid)
+        self.wait_for(lambda: not self.alive(pid), 3)
+        self.assertEqual(bridge.CHILDREN, set())
 
     def test_windows_are_keyed_by_duration_not_position(self):
         team = bridge.codex_windows({"primary": {"usedPercent": 93, "windowDurationMins": 300, "resetsAt": 1},
@@ -273,78 +297,138 @@ class CodexWindowTests(unittest.TestCase):
         self.assertEqual(team["5h"]["used_percent"], 93)
         self.assertEqual(list(free), ["30d"])
         self.assertEqual(free["30d"]["resets_at"], 3)
+        self.assertEqual(bridge.codex_windows({"primary": {"usedPercent": True}}), {})
 
 
-class UpdateTests(unittest.TestCase):
-    def test_homebrew_install_upgrades_in_the_background_and_relaunches(self):
-        with tempfile.TemporaryDirectory() as folder:
-            prefix = Path(folder)
-            (prefix / "Caskroom/usagi").mkdir(parents=True)
-            (prefix / "bin").mkdir()
-            (prefix / "bin/brew").write_text("")
-            (prefix / "bin/brew").chmod(0o755)
-            with mock.patch.object(bridge, "BREW_PREFIXES", (str(prefix),)), \
-                 mock.patch.object(bridge, "CONFIG_DIR", prefix / "config"), \
-                 mock.patch.object(bridge.subprocess, "Popen") as launch:
-                result = bridge.update()
-        self.assertEqual(result, {"updating": True})
-        command = launch.call_args.args[0]
-        self.assertEqual(command[:2], ["/bin/zsh", "-c"])
-        self.assertIn("upgrade --cask usagi", command[2])
-        self.assertIn('open "$1"', command[2])
-        self.assertEqual(command[3:], [str(prefix / "bin/brew"), str(bridge.APP_PATH)])
-        self.assertEqual(bridge.APP_PATH, Path(bridge.__file__).resolve().parents[2])
-        self.assertTrue(launch.call_args.kwargs["start_new_session"])
-
-    def test_other_installs_get_the_release_page(self):
-        with tempfile.TemporaryDirectory() as folder, \
-             mock.patch.object(bridge, "BREW_PREFIXES", (folder,)), \
-             mock.patch.object(bridge.subprocess, "Popen") as launch:
-            result = bridge.update()
-        self.assertEqual(result, {"release_url": "https://github.com/Extransload/usagi/releases/latest"})
-        launch.assert_not_called()
+class TerminationTests(IsolatedTest):
+    def test_sigterm_stops_the_cli_children(self):
+        self.fake_cli("claude", 'print(\'{"loggedIn": false}\')\nraise SystemExit(1)')
+        self.fake_cli("codex", '''
+import os, sys, time
+open(sys.argv[0] + ".pid", "w").write(str(os.getpid()))
+time.sleep(30)
+''')
+        pid_file = Path(str(self.home / ".local/bin/codex") + ".pid")
+        process = subprocess.Popen([PYTHON, str(ROOT / "bridge.py"), "snapshot"], stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, env=dict(os.environ))
+        self.addCleanup(process.kill)
+        self.wait_for(pid_file.exists)
+        pid = int(pid_file.read_text())
+        self.kill_later(pid)
+        process.send_signal(signal.SIGTERM)
+        process.communicate(timeout=5)
+        self.assertEqual(process.returncode, 128 + signal.SIGTERM)
+        self.wait_for(lambda: not self.alive(pid), 3)
 
 
-class CliLookupTests(unittest.TestCase):
-    def test_cli_is_found_outside_a_finder_launch_path(self):
-        with tempfile.TemporaryDirectory() as folder:
-            home = Path(folder)
-            for version in ("v9.11.2", "v20.1.0", "v22.21.1"):
-                (home / ".nvm/versions/node" / version / "bin").mkdir(parents=True)
-                (home / ".nvm/versions/node" / version / "bin/codex").write_text("")
-                (home / ".nvm/versions/node" / version / "bin/codex").chmod(0o755)
-            with mock.patch.object(bridge.shutil, "which", return_value=None), \
-                 mock.patch.object(bridge, "CLI_FOLDERS", ()), \
-                 mock.patch.object(bridge.Path, "home", return_value=home):
-                found = bridge.find_cli("codex")
-                missing = bridge.find_cli("claude")
-        self.assertEqual(found, str(home / ".nvm/versions/node/v22.21.1/bin/codex"))
-        self.assertEqual(missing, "claude")
+class BrowserTests(IsolatedTest):
+    def test_chrome_first_without_applescript(self):
+        with mock.patch.object(bridge, "run", return_value=(0, "")) as run:
+            bridge.open_browser("https://auth.openai.com/example")
+        self.assertEqual(run.call_args_list[0].args[0],
+                         ["/usr/bin/open", "-a", "Google Chrome", "https://auth.openai.com/example"])
+        self.assertEqual(run.call_count, 1)
 
-    def test_path_lookup_wins(self):
-        with mock.patch.object(bridge.shutil, "which", return_value="/somewhere/codex"):
-            self.assertEqual(bridge.find_cli("codex"), "/somewhere/codex")
+    def test_default_browser_when_chrome_is_missing(self):
+        with mock.patch.object(bridge, "run", side_effect=[(1, ""), (0, "")]) as run:
+            bridge.open_browser("https://auth.openai.com/example")
+        self.assertEqual(run.call_args_list[1].args[0], ["/usr/bin/open", "https://auth.openai.com/example"])
+        with mock.patch.object(bridge, "run", return_value=None), \
+             self.assertRaisesRegex(RuntimeError, "Could not open"):
+            bridge.open_browser("https://auth.openai.com/example")
+
+    def test_only_https_urls_open(self):
+        with mock.patch.object(bridge, "run") as run:
+            for url in ("http://auth.openai.com/x", "file:///etc/passwd", "https:///nohost"):
+                with self.assertRaises(ValueError):
+                    bridge.open_browser(url)
+        run.assert_not_called()
 
 
-class ConfigTests(unittest.TestCase):
+class UpdateTests(IsolatedTest):
+    def setUp(self):
+        super().setUp()
+        self.prefix = self.root / "brew"
+        (self.prefix / "Caskroom/usagi").mkdir(parents=True)
+        self.calls = self.root / "brew-calls"
+        self.script(self.prefix / "bin/brew", '#!/bin/sh\necho "$*" >> "%s"\necho "brew $*"\n' % self.calls)
+        patch = mock.patch.object(bridge, "BREW_PREFIXES", (str(self.prefix),))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_homebrew_install_starts_one_background_worker(self):
+        with mock.patch.object(bridge, "start") as start:
+            self.assertEqual(bridge.update(), {"updating": True})
+        command = start.call_args.args[0]
+        self.assertEqual(command[1:], [str(Path(bridge.__file__).resolve()), "update_worker"])
+        self.assertEqual(bridge.APP_PATH, self.root / "Usagi.app")
+
+    def test_running_update_is_not_started_twice(self):
+        lock = bridge.update_lock()
+        self.addCleanup(os.close, lock)
+        with mock.patch.object(bridge, "start") as start:
+            self.assertEqual(bridge.update(), {"updating": True})
+            bridge.update_worker()
+        start.assert_not_called()
+        self.assertFalse(self.calls.exists())
+
+    def test_worker_upgrades_the_qualified_cask_and_reopens(self):
+        log = self.config / "update.log"
+        log.parent.mkdir(parents=True)
+        log.parent.chmod(0o755)
+        log.write_text("old run\n")
+        log.chmod(0o644)
+        bridge.update_worker()
+        self.assertEqual(self.calls.read_text().splitlines(), ["update", "upgrade --cask extransload/tap/usagi"])
+        text = log.read_text()
+        self.assertNotIn("old run", text)
+        self.assertIn("$ /usr/bin/open %s" % bridge.APP_PATH, text)
+        self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+
+    def test_source_and_other_installs_get_the_release_page(self):
+        url = "https://github.com/Extransload/usagi/releases/latest"
+        marker = bridge.APP_PATH / "Contents/Resources/source-install"
+        marker.parent.mkdir(parents=True)
+        marker.write_text("")
+        with mock.patch.object(bridge, "start") as start:
+            self.assertEqual(bridge.update(), {"release_url": url, "source_install": True})
+            marker.unlink()
+            with mock.patch.object(bridge, "BREW_PREFIXES", ()):
+                self.assertEqual(bridge.update(), {"release_url": url})
+        start.assert_not_called()
+
+
+class ConfigTests(IsolatedTest):
     def test_legacy_config_moves_once_and_never_overwrites(self):
-        with tempfile.TemporaryDirectory() as folder:
-            legacy, current = Path(folder) / "AgentUsageBar", Path(folder) / "usagi"
-            legacy.mkdir()
-            (legacy / "cards.json").write_text('[{"provider": "codex", "id": "default"}]')
-            with mock.patch.object(bridge, "LEGACY_CONFIG_DIR", legacy), \
-                 mock.patch.object(bridge, "CONFIG_DIR", current):
-                bridge.migrate_legacy_config()
-                legacy.mkdir()
-                (legacy / "cards.json").write_text("[]")
-                bridge.migrate_legacy_config()
-            self.assertEqual((current / "cards.json").read_text(), '[{"provider": "codex", "id": "default"}]')
-            self.assertEqual((legacy / "cards.json").read_text(), "[]")
+        legacy, current = bridge.LEGACY_CONFIG_DIR, bridge.CONFIG_DIR
+        legacy.mkdir(parents=True)
+        (legacy / "cards.json").write_text('[{"provider": "codex", "id": "default"}]')
+        bridge.migrate_legacy_config()
+        legacy.mkdir()
+        (legacy / "cards.json").write_text("[]")
+        bridge.migrate_legacy_config()
+        self.assertEqual((current / "cards.json").read_text(), '[{"provider": "codex", "id": "default"}]')
+        self.assertEqual((legacy / "cards.json").read_text(), "[]")
 
-    def test_card_and_login_state_live_under_usagi_config(self):
-        self.assertEqual(bridge.CONFIG_DIR, Path.home() / ".config/usagi")
-        self.assertEqual(bridge.CARD_FILE.parent, bridge.CONFIG_DIR)
-        self.assertEqual(bridge.LOGIN_DIR.parent, bridge.CONFIG_DIR)
+    def test_state_files_are_private(self):
+        bridge.save_cards([])
+        self.assertEqual(self.config.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((self.home / ".config").stat().st_mode & 0o777, 0o700)
+        self.assertEqual(bridge.CARD_FILE.stat().st_mode & 0o777, 0o600)
+
+    def test_command_line_keeps_state_under_usagi_config(self):
+        self.fake_cli("claude", 'print(\'{"loggedIn": false}\')\nraise SystemExit(1)')
+        self.fake_cli("codex", "raise SystemExit(1)")
+        result = subprocess.run([PYTHON, str(ROOT / "bridge.py"), "add_auto", "claude"], capture_output=True,
+                                text=True, timeout=20, env=dict(os.environ))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        snapshot = json.loads(result.stdout)
+        self.assertEqual(snapshot["added"], "default")
+        self.assertEqual(snapshot["providers"]["claude"]["accounts"][0]["status"], "signed_out")
+        self.assertTrue((self.home / ".config/usagi/cards.json").exists())
+        result = subprocess.run([PYTHON, str(ROOT / "bridge.py"), "bogus"], capture_output=True, text=True,
+                                timeout=20, env=dict(os.environ))
+        self.assertEqual((result.returncode, json.loads(result.stdout)), (1, {"error": "Invalid command"}))
 
 
 if __name__ == "__main__":
