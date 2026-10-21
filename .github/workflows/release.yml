@@ -1,0 +1,86 @@
+# Builds the release zip for a pushed vX.Y.Z tag, attests its provenance and uploads it to a
+# DRAFT release. release.sh (run by the maintainer) verifies the draft, publishes it and
+# updates the Homebrew cask. Rerunning this workflow replaces the zip on the draft.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+defaults:
+  run:
+    shell: bash  # bash --noprofile --norc -eo pipefail
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check tag, version and changelog
+        run: |
+          version=${TAG#v}
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Tag $TAG is not vX.Y.Z"; exit 1; }
+          plist_version=$(/usr/bin/plutil -extract CFBundleShortVersionString raw Info.plist)
+          [[ $plist_version == "$version" ]] || { echo "::error::Info.plist says $plist_version, tag says $version"; exit 1; }
+          awk -v v="$version" '$1 == "##" && $2 == v {f = 1; next} f && /^## / {exit} f' CHANGELOG.md \
+            | sed -e '/./,$!d' > "$RUNNER_TEMP/changelog.md"
+          grep -q '[^[:space:]]' "$RUNNER_TEMP/changelog.md" || { echo "::error::CHANGELOG.md has no '## $version' section"; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Python tests
+        run: /usr/bin/python3 -m unittest discover -s tests
+
+      - name: Swift tests
+        run: tests/swift/run.sh
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Verify app
+        run: .github/verify-app.sh build/Usagi.app "$VERSION"
+
+      - name: Zip
+        run: |
+          mkdir dist
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent build/Usagi.app "dist/Usagi-$VERSION.zip"
+          shasum -a 256 "dist/Usagi-$VERSION.zip"
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/Usagi-${{ env.VERSION }}.zip
+
+      - name: Upload to draft release
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            cat "$RUNNER_TEMP/changelog.md"
+            echo
+            echo "---"
+            echo "Built by GitHub Actions on the ${ImageOS:-macOS} runner image ${ImageVersion:-unknown} ($RUNNER_ARCH) with $(/usr/bin/swiftc --version 2>&1 | head -1)."
+            echo "Verify the download with \`gh attestation verify Usagi-$VERSION.zip -R $GITHUB_REPOSITORY\`."
+          } > "$notes"
+          zip="dist/Usagi-$VERSION.zip"
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            [[ $draft == true ]] || { echo "::error::Release $TAG is already published; release a new version instead"; exit 1; }
+            gh release edit "$TAG" --title "Usagi $VERSION" --notes-file "$notes"
+            gh release upload "$TAG" "$zip" --clobber
+          else
+            gh release create "$TAG" "$zip" --draft --verify-tag --title "Usagi $VERSION" --notes-file "$notes"
+          fi
