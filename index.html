@@ -293,7 +293,7 @@ function patch(container,blocks){
 }
 const LOADING='<div class="card loading" role="status"><span class="spinner" aria-hidden="true"></span>Loading usage…</div>';
 function render(moved,step){
-  if(drag?.moved){drag.renderLater=[moved,step];return}  // a re-render would replace the card being dragged
+  if(drag?.moved){if(!drag.renderLater?.[0])drag.renderLater=[moved,step];return}  // a re-render would replace the dragged card
   const blocks=[];
   if(!lastData){const e=errors.setup||errors.action||errors.refresh;blocks.push(e?{key:'problem',html:problemCard(e)}:{key:'loading',html:LOADING})}
   const list=lastData?groups(lastData):[];
@@ -367,6 +367,7 @@ window.receiveError=function(encoded){
   const kind=['action','refresh','setup'].includes(e?.kind)?e.kind:'action',action=String(e?.action||''),message=String(e?.message||'Something went wrong.');
   if(action==='update'&&kind!=='refresh'&&updateInfo){updating=false;updateFailed=true;updateError=message;sourceInstall=false;updateHidden=false;clearTimeout(updateTimer);renderUpdate();return}
   if(action==='reorder'&&!orderTimer)pendingOrder=null;
+  if(action==='reorder'&&quitting){send('quit');return}
   errors[kind]={kind,action,message,at:Date.now()};
   render();
 };
@@ -374,7 +375,7 @@ window.actionDone=function(encoded){
   let d;try{d=decode(encoded)}catch(error){return}
   // Saved once the reorder carrying the order on screen is done (ActionDone's provider field holds the order).
   if(d.action==='reorder'&&!orderTimer&&d.provider===pendingOrder?.join(','))pendingOrder=null;
-  if(d.action==='reorder'&&quitAfterOrder)send('quit');
+  if(quitting&&!pendingOrder)send('quit');  // Quit waited for the order on screen to be saved
   setBusy(busyKey(d.action,d.provider,d.account),false);
   render();
 };
@@ -458,7 +459,12 @@ document.addEventListener('click',event=>{
     case 'refresh':startAction('snapshot');break;
     case 'add':openModal('add-overlay');break;
     case 'add-provider':closeModal();if(names[provider]){pendingAdd=provider;startAction('add_auto',provider)}break;
-    case 'quit':if(orderTimer){clearTimeout(orderTimer);sendOrder(pendingOrder);quitAfterOrder=true;setTimeout(()=>send('quit'),3000)}else send('quit');break;  // save a just-made order first
+    case 'quit':  // an order just made is saved first; Quit waits for it (15 s at most) and ignores repeat clicks
+      if(quitting)break;
+      if(!pendingOrder){send('quit');break}
+      quitting=true;b.setAttribute('aria-busy','true');b.setAttribute('aria-disabled','true');
+      if(orderTimer){clearTimeout(orderTimer);sendOrder(pendingOrder)}
+      setTimeout(()=>send('quit'),15000);break;
     case 'prev':case 'next':rotate(provider,action==='prev'?-1:1);break;
     case 'select':case 'login':startAction(action,provider,account);break;
     case 'hide':pendingHide={provider,account};$('hide-title').textContent=`Hide ${names[provider]} · ${nameFor(provider,account)}?`;openModal('hide-overlay');break;
@@ -475,7 +481,7 @@ document.addEventListener('click',event=>{
 function serviceOrder(){return [...document.querySelectorAll('#cards .carousel')].map(b=>b.dataset.provider)}
 // The page keeps showing the user's order (pendingOrder) until Usagi has saved it: snapshots from jobs that
 // started earlier still carry the old order. Orders are sent after a short pause, so only the last one runs.
-let pendingOrder=null,orderTimer=null,quitAfterOrder=false;
+let pendingOrder=null,orderTimer=null,quitting=false;
 function ordered(cards,order){const rank=Object.fromEntries(order.map((p,i)=>[p,i]));return [...(cards||[])].sort((a,b)=>(rank[a.provider]??order.length)-(rank[b.provider]??order.length))}
 function sendOrder(order){orderTimer=null;send('reorder',{order:order.join(',')})}
 function applyOrder(order){
@@ -494,7 +500,8 @@ function clearDrop(){document.querySelectorAll('.drop-before,.drop-after').forEa
 $('cards').addEventListener('pointerdown',event=>{
   const head=event.target.closest('.card-head'),box=head?.closest('.carousel');
   if(!box||event.button!==0||event.target.closest('button')||serviceOrder().length<2)return;
-  drag={box,id:event.pointerId,y:event.clientY,scroll:$('cards').scrollTop,moved:false,target:null};
+  const area=$('cards').getBoundingClientRect(),start=box.getBoundingClientRect();
+  drag={box,id:event.pointerId,y:event.clientY,scroll:$('cards').scrollTop,moved:false,target:null,min:area.top-start.top,max:area.bottom-start.bottom};
 });
 addEventListener('pointermove',event=>{
   if(!drag||event.pointerId!==drag.id)return;
@@ -502,7 +509,7 @@ addEventListener('pointermove',event=>{
   const dy=event.clientY-drag.y+($('cards').scrollTop-drag.scroll);
   if(!drag.moved){if(Math.abs(dy)<5)return;drag.moved=true;drag.box.classList.add('dragging');try{drag.box.setPointerCapture(event.pointerId)}catch(error){}}
   event.preventDefault();
-  drag.box.style.transform=`translateY(${dy}px)`;
+  drag.box.style.transform=`translateY(${Math.min(drag.max,Math.max(drag.min,dy))}px)`;  // stays inside the list, so no scrollbar appears
   const p=drag.box.dataset.provider,others=[...document.querySelectorAll('#cards .carousel')].filter(b=>b.dataset.provider!==p);
   let before=others.find(b=>{const r=b.getBoundingClientRect();return event.clientY<r.top+r.height/2});
   clearDrop();
