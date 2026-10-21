@@ -48,7 +48,9 @@ enum LaunchEnvironment {
     /// `failed` runs (on the main thread) when a call fails, so the next snapshot tries again.
     static func sync(_ wanted: [String: AppEnvironment.Target]?, home: String, failed: @escaping @MainActor @Sendable () -> Void) {
         queue.async {
-            var previous = UserDefaults.standard.dictionary(forKey: AppEnvironment.previousKey) as? [String: String] ?? [:]
+            let defaults = UserDefaults.standard
+            if wanted == nil && !defaults.bool(forKey: AppEnvironment.inUseKey) { return }  // never used: nothing to undo
+            var previous = defaults.dictionary(forKey: AppEnvironment.previousKey) as? [String: String] ?? [:]
             let now = current(AppEnvironment.variables)
             for name in AppEnvironment.variables {  // someone else's value is back (or set anew): nothing to put back
                 if let value = now[name], !AppEnvironment.isUsagis(name, value, home: home) { previous[name] = nil }
@@ -56,9 +58,12 @@ enum LaunchEnvironment {
             var ok = true, folderFailed = Set<String>()
             for change in AppEnvironment.changes(wanted: wanted, current: now, previous: previous, home: home) {
                 guard let owner = AppEnvironment.owner(change.name), !folderFailed.contains(owner.key) else { continue }
-                if change.ours, let before = now[change.name], !AppEnvironment.isUsagis(change.name, before, home: home) {
-                    previous[change.name] = before
-                    save(previous)
+                if change.ours {
+                    defaults.set(true, forKey: AppEnvironment.inUseKey)
+                    if let before = now[change.name], !AppEnvironment.isUsagis(change.name, before, home: home) {
+                        previous[change.name] = before
+                        save(previous)
+                    }
                 }
                 let done = run(change.value.map { ["setenv", change.name, $0] } ?? ["unsetenv", change.name]).ok
                 if done && !change.ours { previous[change.name] = nil }
@@ -66,6 +71,7 @@ enum LaunchEnvironment {
                 ok = done && ok
             }
             save(previous)
+            if wanted == nil && ok { defaults.set(false, forKey: AppEnvironment.inUseKey) }
             if !ok { DispatchQueue.main.async { MainActor.assumeIsolated { failed() } } }
         }
     }

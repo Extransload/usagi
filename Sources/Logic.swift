@@ -392,6 +392,9 @@ enum AppEnvironment {
     struct Change: Equatable { let name: String, value: String?, ours: Bool }
 
     static let enabledKey = "alsoUseInApps", previousKey = "appEnvironmentPrevious"
+    /// Set before Usagi's first setenv and cleared once it has undone everything: until then, Usagi never
+    /// touches launchd, so someone's own profile-shaped value is safe unless the option was used.
+    static let inUseKey = "appEnvironmentInUse"
     static let providers = [("claude", "CLAUDE_CONFIG_DIR", ".claude", "CLAUDE"), ("codex", "CODEX_HOME", ".codex", "CODEX")]
     /// The shell hooks' tracking variables: a terminal app opened while a profile was set passes them to its
     /// new tabs, so usagi.zsh and Agent Kit's hook undo the inherited folder once the account is default again.
