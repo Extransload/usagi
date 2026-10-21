@@ -2,6 +2,12 @@
 
 All notable changes to Usagi. Each `## X.Y.Z` section is used as the release notes for that version: `release.sh` and the Release workflow stop if the section is missing.
 
+## 1.0.4
+
+### Added
+
+- The bottom of the menu shows your Usagi version and whether it is up to date. Click it, or choose **Check for Updates** from the right-click menu, to check right away instead of waiting up to 6 hours.
+
 ## 1.0.3 - 2026-10-21
 
 ### Fixed

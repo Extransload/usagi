@@ -15,6 +15,7 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 @MainActor final class UsageController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate {
     var onResize: ((CGFloat) -> Void)?
     var onStatus: (() -> Void)?
+    var onCheckUpdates: (() -> Void)?
     private(set) var snapshot: [String: Any]?
     private(set) var lastSuccess: Date?
     private(set) var lastError: String?
@@ -81,8 +82,9 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 
     func refresh(_ origin: JobOrigin) { enqueue(Job(arguments: origin == .user ? Job.userRefresh : Job.refresh, origin: origin)) }
 
+    /// Kept for page reloads; a failed check doesn't replace an earlier answer.
     func setUpdate(_ info: [String: String]) {
-        update = info
+        if info["failed"] == nil || update == nil { update = info }
         callPage("setUpdate", json: info)
     }
 
@@ -148,6 +150,7 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
         case .bridge(let arguments): enqueue(Job(arguments: arguments, origin: .user))
         case .resize(let height): onResize?(CGFloat(height))
         case .quit: NSApp.terminate(nil)
+        case .checkUpdates: onCheckUpdates?()
         }
     }
 

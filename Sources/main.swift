@@ -5,12 +5,13 @@ enum Updates {
     static let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     @MainActor private static var schedule = UpdateSchedule()
 
-    @MainActor static func check(then found: @escaping @MainActor ([String: String]) -> Void) {
-        guard schedule.begin(now: Date()) else { return }
+    /// Reports every finished check (newer, up to date or failed) so the page can say which.
+    @MainActor static func check(force: Bool = false, then report: @escaping @MainActor ([String: String]) -> Void) {
+        guard schedule.begin(now: Date(), force: force) else { return }
         Task {
             let version = await latestVersion()
             schedule.finish(success: version != nil, now: Date())
-            if let version, Version.newer(version, than: current) { found(["version": version, "current": current]) }
+            report(UpdateStatus.info(latest: version, current: current, now: Date()))
         }
     }
 
@@ -67,6 +68,7 @@ enum Updates {
     private lazy var menu: NSMenu = {
         let menu = NSMenu()
         menu.addItem(withTitle: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "r").target = self
+        menu.addItem(withTitle: "Check for Updates", action: #selector(checkForUpdatesNow), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Usagi", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q").target = NSApp
         return menu
@@ -91,6 +93,7 @@ enum Updates {
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         controller = UsageController()
         controller.onStatus = { [weak self] in self?.updateStatus() }
+        controller.onCheckUpdates = { [weak self] in self?.checkForUpdate(force: true) }
         controller.onResize = { [weak self] height in self?.popover.contentSize = NSSize(width: 380, height: height) }
         popover = NSPopover()
         popover.contentViewController = controller
@@ -129,6 +132,16 @@ enum Updates {
 
     @objc private func refreshNow() { controller.refresh(.user) }
 
+    /// From the right-click menu: check now and open the menu, where the footer or the banner shows the answer.
+    @objc private func checkForUpdatesNow() {
+        checkForUpdate(force: true) { [weak self] in
+            guard let self, !self.popover.isShown, let button = self.statusItem.button else { return }
+            NSApp.activate()
+            self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            self.controller.view.window?.makeKey()
+        }
+    }
+
     /// Quit Usagi (menu or page) ends here too: don't leave a bridge run behind.
     func applicationWillTerminate(_ notification: Notification) { Bridge.stopAll() }
 
@@ -150,8 +163,11 @@ enum Updates {
         }
     }
 
-    private func checkForUpdate() {
-        Updates.check { [weak self] info in self?.controller.setUpdate(info) }
+    private func checkForUpdate(force: Bool = false, then done: (@MainActor () -> Void)? = nil) {
+        Updates.check(force: force) { [weak self] info in
+            self?.controller.setUpdate(info)
+            done?()
+        }
     }
 
     /// Up to two cards' usage with provider icons, or the rabbit when there are no cards. Dimmed (and

@@ -15,13 +15,13 @@ Needs macOS 14 or later and the Claude Code or Codex CLI ([requirements](#requir
 
 <img src="docs/screenshot.png" width="380" alt="Usagi menu with a Claude card and a Codex card showing 5-hour, weekly and model limits, when each reading was updated and when each limit resets">
 
-- A rabbit icon or your usage percentages appear in the menu bar. Click it to open the account cards; right-click it for **Refresh Now** and **Quit Usagi**.
+- A rabbit icon or your usage percentages appear in the menu bar. Click it to open the account cards; right-click it for **Refresh Now**, **Check for Updates** and **Quit Usagi**.
 - To start Usagi when you log in, add it under **System Settings > General > Login Items**.
 - Usagi is not signed or notarized by Apple. So that it opens right away, the Homebrew install removes the macOS quarantine flag. That skips Apple's check, so install it only if you trust this repository. From 1.0.3 on, every release zip is built by GitHub Actions and can be checked with `gh attestation verify` ([SECURITY.md](SECURITY.md)).
 
 ## Update and uninstall
 
-When you open the menu, Usagi checks GitHub for a newer release (at most every 6 hours) and asks whether to update. With a Homebrew install, **Update** runs `brew update` and `brew upgrade --cask extransload/tap/usagi` in the background and reopens Usagi. Only one update runs at a time; the output goes to `~/.config/usagi/update.log`, and if the update hasn't finished after 11 minutes the menu says so and offers to retry. A copy built from source opens the release page instead. To be notified by email, use **Watch > Custom > Releases** on the GitHub repository.
+When you open the menu, Usagi checks GitHub for a newer release (at most every 6 hours) and asks whether to update. The bottom of the menu shows your version and whether it is up to date; click it to check right away. With a Homebrew install, **Update** runs `brew update` and `brew upgrade --cask extransload/tap/usagi` in the background and reopens Usagi. Only one update runs at a time; the output goes to `~/.config/usagi/update.log`, and if the update hasn't finished after 11 minutes the menu says so and offers to retry. A copy built from source opens the release page instead. To be notified by email, use **Watch > Custom > Releases** on the GitHub repository.
 
 By hand:
 
@@ -101,17 +101,18 @@ Checked on the developer's Mac on 2026-10-21.
 
 Checked:
 
-- 96 Python tests, 159 Swift checks, and 204 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
+- 96 Python tests, 168 Swift checks, and 230 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
 - Reading Claude Max 20x, Codex Team and Codex Free accounts with the short `PATH` an app opened from Finder gets
 - A CLI installed the npm way (a `#!/usr/bin/env node` script next to its own `node` under `~/.nvm`, simulated with a stand-in CLI) found and run without Node on `PATH`
 - Starting with an empty home folder: no cards, an onboarding card, and the bridge's answers for signed-out and missing CLIs
 - Bridge time limits: a hung CLI is stopped and its child processes are cleaned up
 - The build: arm64 and x86_64, minimum macOS 14.0, ad-hoc signature with hardened runtime
+- CI on GitHub: tests, build, bundle checks, a bridge snapshot and a launch on macOS 14, 15 and 26 and on an Intel runner
+- Updating from 1.0.2 to 1.0.3 with the **Update** button on this Mac: Homebrew quit Usagi, replaced it and reopened it
 
 Not checked yet:
 
-- Updating with the **Update** button from one release to the next
-- Running on an Intel Mac, and on macOS 14, 15 or 26 (CI builds and launches Usagi on them once it runs on GitHub)
+- Using the menu on a real Intel Mac or on macOS 14, 15 or 26 (CI only builds and launches it there)
 - Sign-in on a Mac without Chrome (the default-browser fallback is covered by automated tests only)
 
 ## Agent Kit users

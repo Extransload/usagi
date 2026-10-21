@@ -19,7 +19,7 @@ enum Version {
 }
 
 enum PageMessage: Equatable {
-    case bridge([String]), resize(Double), quit
+    case bridge([String]), resize(Double), quit, checkUpdates
 
     static let providers: Set<String> = ["claude", "codex"]
     static let heights: ClosedRange<Double> = 260...540
@@ -42,6 +42,7 @@ enum PageMessage: Equatable {
         case "snapshot": return .bridge(Job.userRefresh)
         case "update": return .bridge([action])
         case "quit": return .quit
+        case "check_update": return .checkUpdates
         case "resize":
             guard let text = fields["height"] as? String, let height = Double(text), height.isFinite else { return nil }
             return .resize(min(heights.upperBound, max(heights.lowerBound, height)))
@@ -287,8 +288,9 @@ struct UpdateSchedule {
     private(set) var inFlight = false
     private(set) var next: Date?
 
-    mutating func begin(now: Date) -> Bool {
-        guard !inFlight, next.map({ now >= $0 }) ?? true else { return false }
+    /// `force` (the user asked) skips the wait, but never starts a second check while one is running.
+    mutating func begin(now: Date, force: Bool = false) -> Bool {
+        guard !inFlight, force || next.map({ now >= $0 }) ?? true else { return false }
         inFlight = true
         return true
     }
@@ -296,6 +298,16 @@ struct UpdateSchedule {
     mutating func finish(success: Bool, now: Date) {
         inFlight = false
         next = now.addingTimeInterval(success ? Self.interval : Self.retry)
+    }
+}
+
+enum UpdateStatus {
+    /// What the page gets after a check: `version` when a newer release exists (it shows the banner), `latest`
+    /// when this copy is current, `failed` when GitHub couldn't be reached.
+    static func info(latest: String?, current: String, now: Date) -> [String: String] {
+        guard let latest else { return ["current": current, "failed": "true"] }
+        return ["current": current, "checked_at": String(Int(now.timeIntervalSince1970)),
+                Version.newer(latest, than: current) ? "version" : "latest": latest]
     }
 }
 

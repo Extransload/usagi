@@ -86,6 +86,7 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 .mini{width:22px;height:22px;border-radius:7px;padding:0;display:grid;place-items:center;flex:none;--bg:transparent;--bd:transparent;--fg:var(--muted)}.mini svg{width:12px;height:12px;stroke-width:2.2}
 .alert .text-button{height:22px;padding:0 7px;font-size:10px}
 .footer{display:flex;flex:none;gap:8px;align-items:center;padding:3px 3px 0;color:var(--muted);font-size:10px}
+.version{border:0;background:none;color:var(--muted);font-size:10px;padding:3px 6px;border-radius:6px;white-space:nowrap}.version:hover{background:var(--control)}.version[hidden]{display:none}
 .update{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:9px 10px;border:1px solid var(--blue);border-radius:12px;background:var(--card);font-size:11px;backdrop-filter:blur(20px)}
 .update .text{flex:1;min-width:0;display:grid;gap:2px}.update .text span{color:var(--muted);font-size:10px}
 .update button{flex:none;border-radius:8px;padding:5px 9px;font-size:11px}
@@ -103,7 +104,7 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
   <div id="update" aria-live="polite"></div>
   <div id="cards"></div>
   <div id="error" role="alert"></div>
-  <div class="footer"><button class="icon-button" id="add" data-action="add" data-key="footer:add" data-icon="plus" title="Add account" aria-label="Add account"></button><span class="spacer"></span><button class="icon-button" data-action="quit" data-key="footer:quit" data-icon="power" title="Quit Usagi" aria-label="Quit Usagi"></button></div>
+  <div class="footer"><button class="icon-button" id="add" data-action="add" data-key="footer:add" data-icon="plus" title="Add account" aria-label="Add account"></button><span class="spacer"></span><button class="version" id="version" data-action="version" data-key="footer:version" hidden></button><span class="spacer"></span><button class="icon-button" data-action="quit" data-key="footer:quit" data-icon="power" title="Quit Usagi" aria-label="Quit Usagi"></button></div>
 </div>
 <div id="announce" class="sr-only" aria-live="polite"></div>
 <div class="overlay" id="add-overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="add-title"><div class="dialog-head"><h2 id="add-title">Add account</h2><button class="icon-button" data-action="close-dialog" data-icon="close" title="Close" aria-label="Close"></button></div><div class="provider-grid"><button class="provider-option" data-action="add-provider" data-provider="claude" aria-label="Add a Claude account"><img src="assets/claude.png" data-provider-icon="claude" alt=""><span>Claude</span></button><button class="provider-option" data-action="add-provider" data-provider="codex" aria-label="Add a Codex account"><img src="assets/codex.png" data-provider-icon="codex" alt=""><span>Codex</span></button></div></div></div>
@@ -134,6 +135,7 @@ function send(action,fields){const body={action};for(const [k,v] of Object.entri
 
 let lastData=null,modal=null,opener=null,pendingHide=null,pendingAdd=null,sentHeight=0;
 let updateInfo=null,updateHidden=false,updating=false,updateFailed=false,updateError='',sourceInstall=false,updateTimer=null;
+let versionInfo=null,checkingUpdate=false,checkFailedNow=false,checkTimer=null;
 const errors={setup:null,action:null,refresh:null};
 const busy=new Map(),carouselPos={},carouselIdx={},lastGood={},providerIcons={};
 
@@ -313,7 +315,7 @@ window.receiveSnapshot=function(encoded){
   lastData=data;remember(data);
   // An action error goes on a later Refresh, or on a snapshot 15 s after it appeared (dismiss and the next action clear it too).
   errors.setup=null;errors.refresh=null;if(errors.action&&(errors.action.action==='snapshot'||Date.now()-errors.action.at>=15000))errors.action=null;
-  render(moved,1);
+  render(moved,1);renderVersion();
   if(moved)announce(`Added ${names[moved]} · ${data.added}`);
 };
 window.receiveError=function(encoded){
@@ -333,7 +335,32 @@ window.setProviderIcons=function(icons){
   document.querySelectorAll('[data-provider-icon]').forEach(img=>{img.src=iconSrc(img.dataset.providerIcon)});
   render();
 };
-window.setUpdate=function(info){updateInfo=info&&info.version?info:null;renderUpdate()};
+// After every update check: `version` when a newer release exists (the banner), `latest` when this copy is
+// current, `failed` when GitHub couldn't be reached (a failure doesn't hide an earlier answer).
+window.setUpdate=function(info){
+  if(!info||typeof info!=='object')return;
+  checkFailedNow=checkingUpdate&&!!info.failed;checkingUpdate=false;clearTimeout(checkTimer);
+  if(!info.failed||!versionInfo||versionInfo.failed){versionInfo=info;updateInfo=info.version?info:null}
+  renderUpdate();renderVersion();
+};
+function renderVersion(){
+  const node=$('version'),current=versionInfo?.current||lastData?.version;
+  if(!current){node.hidden=true;return}
+  const checked=versionInfo?.checked_at?new Date(Number(versionInfo.checked_at)*1000):null;
+  const at=checked?` (checked ${checked.toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})})`:'';
+  let state='',title='Check for updates';
+  if(checkingUpdate)state='Checking…';
+  else if(checkFailedNow)state="Couldn't check",title="Couldn't reach GitHub. Click to try again.";
+  else if(updateInfo)state='Update available',title=`Usagi ${updateInfo.version} is available. Click to show it.`;
+  else if(versionInfo?.latest)state='Up to date',title=`You have the latest version${at}. Click to check again.`;
+  node.hidden=false;node.textContent=`Usagi ${current}${state?' · '+state:''}`;node.title=title;node.setAttribute('aria-label',`${node.textContent}. ${title}`);
+}
+function checkUpdates(){
+  if(updateInfo){updateHidden=false;renderUpdate();return}
+  if(checkingUpdate)return;
+  checkingUpdate=true;checkFailedNow=false;renderVersion();send('check_update');
+  clearTimeout(checkTimer);checkTimer=setTimeout(()=>{if(checkingUpdate){checkingUpdate=false;checkFailedNow=true;renderVersion()}},40000);
+}
 window.receiveUpdateResult=function(encoded){
   let r;try{r=decode(encoded)}catch(error){r={}}
   if(!r.updating){updating=false;clearTimeout(updateTimer);if(r.source_install)sourceInstall=true;else updateHidden=true}
@@ -390,6 +417,7 @@ document.addEventListener('click',event=>{
     case 'close-dialog':pendingHide=null;closeModal();break;
     case 'update':startUpdate();break;
     case 'update-later':updateHidden=true;renderUpdate();break;
+    case 'version':checkUpdates();break;
     case 'dismiss-error':errors[b.dataset.kind]=null;render();break;
   }
 });

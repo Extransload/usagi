@@ -272,5 +272,22 @@ equal(BridgeOutput.errorMessage(stdout: Data(), stderr: Data("Traceback\n  File 
 equal(BridgeOutput.errorMessage(stdout: Data("oops".utf8), stderr: Data(), status: 2),
       "The usage reader failed (exit status 2).", "fallback")
 
+// Update status for the page's footer, and checks the user asks for
+let checkedAt = Date(timeIntervalSince1970: 1_800_000_000)
+equal(UpdateStatus.info(latest: "1.0.4", current: "1.0.3", now: checkedAt),
+      ["current": "1.0.3", "version": "1.0.4", "checked_at": "1800000000"], "newer release → banner")
+equal(UpdateStatus.info(latest: "1.0.3", current: "1.0.3", now: checkedAt),
+      ["current": "1.0.3", "latest": "1.0.3", "checked_at": "1800000000"], "same version → up to date")
+equal(UpdateStatus.info(latest: "1.0.2", current: "1.0.3", now: checkedAt),
+      ["current": "1.0.3", "latest": "1.0.2", "checked_at": "1800000000"], "older release → up to date")
+equal(UpdateStatus.info(latest: nil, current: "1.0.3", now: checkedAt), ["current": "1.0.3", "failed": "true"], "failed check")
+check(PageMessage.parse(["action": "check_update"]) == .checkUpdates, "page asks for a check")
+var asked = UpdateSchedule()
+check(asked.begin(now: checkedAt), "first check")
+asked.finish(success: true, now: checkedAt)
+check(!asked.begin(now: checkedAt + 60), "waits 6 h")
+check(asked.begin(now: checkedAt + 60, force: true), "the user can check now")
+check(!asked.begin(now: checkedAt + 61, force: true), "but not twice at once")
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)
