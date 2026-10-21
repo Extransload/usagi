@@ -89,7 +89,7 @@ Checked:
 - A Mac without Agent Kit, simulated with an empty home folder: clean start, adding a profile, selecting an account, and `usagi.zsh` switching `CODEX_HOME`
 - Installing with `brew install --cask` and opening the app without a Gatekeeper block
 - The Codex icon taken from the installed ChatGPT app, and the Claude icon downloaded from claude.ai (the test Mac has no Claude app)
-- 29 automated tests
+- 31 automated tests
 
 Not checked:
 
