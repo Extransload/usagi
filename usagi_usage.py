@@ -1,5 +1,5 @@
 """Claude usage from local caches. Only percentages and reset times are read, never tokens."""
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
@@ -9,6 +9,8 @@ import time
 import usagi_accounts
 
 CLAUDE_PROFILE = Path.home() / ".claude.json"
+STALE_AFTER = {"5h": 30 * 60}  # seconds; longer windows change slowly
+STALE_DEFAULT = 3 * 3600
 
 
 def _number(value):
@@ -19,14 +21,26 @@ def _number(value):
 
 
 def _epoch(value):
-    """ISO 8601 ('2026-10-15T10:19:59.644864+00:00') or a number → unix seconds."""
+    """ISO 8601 ('2026-10-15T10:19:59.644864+00:00') or a number → unix seconds. Python 3.9's
+    fromisoformat takes only 3 or 6 fraction digits; a time without a zone is UTC."""
     number = _number(value)
     if number is not None:
         return number
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
-    except (TypeError, ValueError):
+    if not isinstance(value, str):
         return None
+    text = value.strip()
+    text = text[:-1] + "+00:00" if text.endswith(("Z", "z")) else text
+    text = re.sub(r"(?<=:\d\d)\.(\d+)", lambda match: "." + (match.group(1) + "00000")[:6], text, count=1)
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).timestamp()
+
+
+def _stale(label, captured_at, now):
+    """The reading may be outdated: a 5h window after 30 minutes, longer ones after 3 hours."""
+    return captured_at is None or now - captured_at > STALE_AFTER.get(label, STALE_DEFAULT)
 
 
 def _live(windows, captured_at, now):
@@ -46,6 +60,7 @@ def _live(windows, captured_at, now):
                            "captured_at": max(resets, captured_at or 0.0)}
         else:
             live[label] = {"used_percent": used, "resets_at": resets, "captured_at": captured_at}
+        live[label]["stale"] = _stale(label, live[label]["captured_at"], now)
     return live
 
 
