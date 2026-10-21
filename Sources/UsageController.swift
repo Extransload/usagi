@@ -25,6 +25,8 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     private var webView: WKWebView!
     private var shown = false
     private var asleep = false
+    private var pageStopped = false
+    private var crashReloads = CrashReloads()
     private var toolsFound = false
     private var jobs = JobQueue()
     private var logins = LoginWatches()
@@ -45,8 +47,11 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     override func viewDidLoad() {
         super.viewDidLoad()
         let center = NSWorkspace.shared.notificationCenter
+        // Switching to another user counts as sleep; popoverOpened() also wakes, in case a wake never arrives.
         for (name, asleep) in [(NSWorkspace.screensDidSleepNotification, true), (NSWorkspace.willSleepNotification, true),
-                               (NSWorkspace.screensDidWakeNotification, false), (NSWorkspace.didWakeNotification, false)] {
+                               (NSWorkspace.sessionDidResignActiveNotification, true),
+                               (NSWorkspace.screensDidWakeNotification, false), (NSWorkspace.didWakeNotification, false),
+                               (NSWorkspace.sessionDidBecomeActiveNotification, false)] {
             center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.setAsleep(asleep) }
             }
@@ -59,7 +64,12 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 
     func popoverOpened() {
         shown = true
+        if pageStopped {
+            pageStopped = false
+            loadPage()
+        }
         callPage("popoverShown")
+        setAsleep(false)
         if Cadence.refreshOnOpen(since: lastRefresh, now: Date()) { refresh(.followUp) }
         scheduleRefresh()
     }
@@ -69,7 +79,7 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
         scheduleRefresh()
     }
 
-    func refresh(_ origin: JobOrigin) { enqueue(["snapshot"], origin) }
+    func refresh(_ origin: JobOrigin) { enqueue(Job(arguments: origin == .user ? Job.userRefresh : Job.refresh, origin: origin)) }
 
     func setUpdate(_ info: [String: String]) {
         update = info
@@ -122,7 +132,9 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
         if shown { callPage("popoverShown") }
     }
 
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { loadPage() }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        if crashReloads.allow(now: Date()) { loadPage() } else { pageStopped = true }
+    }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void) {
@@ -133,7 +145,7 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
         guard message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.protocol == "file",
               isBundled(message.frameInfo.request.url), let command = PageMessage.parse(message.body) else { return }
         switch command {
-        case .bridge(let arguments): enqueue(arguments, .user)
+        case .bridge(let arguments): enqueue(Job(arguments: arguments, origin: .user))
         case .resize(let height): onResize?(CGFloat(height))
         case .quit: NSApp.terminate(nil)
         }
@@ -141,9 +153,9 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 
     // MARK: Bridge runs
 
-    private func enqueue(_ arguments: [String], _ origin: JobOrigin) {
-        if origin == .background && asleep { return }
-        jobs.add(Job(arguments: arguments, origin: origin))
+    private func enqueue(_ job: Job) {
+        if job.origin == .background && asleep { return }
+        jobs.add(job)
         startNext()
     }
 
@@ -168,12 +180,13 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
             failure = error
         }
         if let failure { failed(job, failure, now: now) }
-        if job.origin == .user {
-            let arguments = job.arguments
-            callPage("actionDone", base64: json(["action": arguments[0],
-                                                 "provider": arguments.count > 1 ? arguments[1] as Any : NSNull(),
-                                                 "account": arguments.count > 2 ? arguments[2] as Any : NSNull(),
-                                                 "ok": failure == nil]))
+        var reports = job.reports
+        if job.origin == .user { reports.append(ActionDone(job.arguments, ok: failure == nil)) }
+        if failure == nil && job.arguments[0] == "login" {
+            // Busy ends once the card shows the sign-in connecting, so a second click can't start another one.
+            enqueue(Job(arguments: Job.refresh, origin: .followUp, reports: reports))
+        } else {
+            for report in reports { callPage("actionDone", base64: json(report.json)) }
         }
         onStatus?()
         startNext()
@@ -188,10 +201,9 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
         switch arguments[0] {
         case "login":
             logins.start(AccountKey(provider: arguments[1], account: arguments[2]), now: now)
-            enqueue(["snapshot"], .followUp)
         case "login_status":
             let key = AccountKey(provider: arguments[1], account: arguments[2])
-            if logins.status(key, connecting: object["connecting"] as? Bool, now: now) { enqueue(["snapshot"], .followUp) }
+            if logins.status(key, connecting: object["connecting"] as? Bool, now: now) { refresh(.followUp) }
         case "update":
             callPage("receiveUpdateResult", base64: data)
             if let link = object["release_url"] as? String, let url = URL(string: link), url.scheme == "https" {
@@ -217,7 +229,7 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
         let action = job.arguments[0]
         if action == "login_status" {
             let key = AccountKey(provider: job.arguments[1], account: job.arguments[2])
-            if logins.status(key, connecting: nil, now: now) && !failure.setup { enqueue(["snapshot"], .followUp) }
+            if logins.status(key, connecting: nil, now: now) && !failure.setup { refresh(.followUp) }
             guard failure.setup else { return }
         }
         if action == "snapshot" || failure.setup {
@@ -272,7 +284,9 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     }
 
     private func pollLogins() {
-        if let key = logins.due(now: Date()) { enqueue(["login_status", key.provider, key.account], .background) }
+        if let key = logins.due(now: Date()) {
+            enqueue(Job(arguments: ["login_status", key.provider, key.account], origin: .background))
+        }
         updateLoginTimer()
     }
 }
