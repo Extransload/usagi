@@ -47,6 +47,7 @@ equal(PageMessage.parse(["action": "resize", "height": "9000"]), .resize(4000), 
 equal(PopoverHeight.fit(700, available: 1000), 700, "fits on screen: no scrolling")
 equal(PopoverHeight.fit(1200, available: 900), 876, "taller than the screen: scroll inside")
 equal(PopoverHeight.fit(100, available: 900), 260, "minimum height")
+equal(PopoverHeight.fit(700, available: 250), 250, "never taller than the screen")
 equal(PopoverHeight.fit(700, available: nil), 540, "no screen known: old cap")
 equal(PageMessage.parse(["action": "resize", "height": "12.5"]), .resize(260), "resize clamps low")
 for bad: [String: Any] in [
@@ -99,11 +100,16 @@ equal(MenuBar.items(activeSecond).items.last, MenuBarItem(provider: "codex", per
 var hiddenActive = activeSecond
 hiddenActive["cards"] = [["provider": "claude", "id": "default"], ["provider": "codex", "id": "default"]]
 equal(MenuBar.items(hiddenActive).items.last, MenuBarItem(provider: "codex", percent: 12), "Active card hidden: first card")
+var savedOrder = activeSecond
+savedOrder["cards"] = [["provider": "codex", "id": "account-3"], ["provider": "codex", "id": "account-2"]]
+savedOrder["providers"] = ["codex": ["active": "default", "accounts": [account("default", ["5h": 1]), account("account-2", ["5h": 20]), account("account-3", ["5h": 30])]]]
+equal(MenuBar.items(savedOrder).items, [MenuBarItem(provider: "codex", percent: 20)], "fallback follows the page's order")
 equal(MenuBar.items(snapshot, limit: 1).items, [MenuBarItem(provider: "claude", percent: 42)], "limit 1")
 equal(MenuBar.items(snapshot, limit: 1).more, 1, "one service left out")
 equal(MenuBar.items(snapshot, limit: nil).items.count, 2, "all services")
 equal(MenuBar.serviceLimit(stored: nil), 2, "default limit")
-equal(MenuBar.serviceLimit(stored: 3), 3, "stored limit")
+equal(MenuBar.serviceLimit(stored: 1), 1, "stored limit")
+equal(MenuBar.serviceLimit(stored: 3), nil, "no third service yet: all")
 equal(MenuBar.serviceLimit(stored: 0), nil, "0 means all")
 equal(MenuBar.items(["cards": [], "providers": [:]]).items, [], "no cards")
 equal(MenuBar.items(["cards": [["provider": "claude", "id": "gone"]], "providers": [:]]).items,

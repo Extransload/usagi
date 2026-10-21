@@ -183,13 +183,20 @@ function button(cls,action,p,id,iconName,text,label,title,extra={}){
 // email yet, default is "Account 1" and account-N is "Account N".
 function slotName(id){const n=/^account-(\d+)$/.exec(id);return id==='default'?'Account 1':n?`Account ${n[1]}`:id}
 function folderOf(p,id){const base=p==='claude'?'~/.claude':'~/.codex';return id==='default'?base:`${base}-${id}`}
-function accountName(p,a){return a?.email||lastGood[`${p}:${a?.id}`]?.email||slotName(a?.id||'')}
+// Same rule as the card: a remembered email only stands in while the status can't be checked; two
+// accounts of a service with one email get their number added.
+function accountName(p,a){
+  const email=a?.email||(statusOf(a||{})==='unknown'?lastGood[`${p}:${a?.id}`]?.email:null);
+  if(!email)return slotName(a?.id||'');
+  const twins=(lastData?.providers?.[p]?.accounts||[]).filter(o=>o.id!==a.id&&(o.email||(statusOf(o)==='unknown'?lastGood[`${p}:${o.id}`]?.email:null))===email);
+  return twins.length?`${email} (${slotName(a.id)})`:email;
+}
 function nameFor(p,id){return accountName(p,(lastData?.providers?.[p]?.accounts||[]).find(a=>a.id===id)||{id})}
 function card(g,a,index){
   const p=g.source,id=a.id,status=statusOf(a),isDefault=id===g.active,count=g.accounts.length;
   const cached=status==='unknown'?lastGood[`${p}:${id}`]:null;
-  const email=a.email||cached?.email,plan=a.plan||cached?.plan,name=email||slotName(id),label=`${names[p]} · ${name}`;
-  const nav=count>1?`<span class="nav-group"><button class="nav" data-action="prev" data-provider="${esc(p)}" data-key="${esc(p)}:prev" aria-label="Previous ${names[p]} account" title="Previous account">${icon('prev')}</button><span class="count"><span aria-hidden="true">${index+1}/${count}</span><span class="sr-only">Account ${index+1} of ${count}</span></span><button class="nav" data-action="next" data-provider="${esc(p)}" data-key="${esc(p)}:next" aria-label="Next ${names[p]} account" title="Next account">${icon('next')}</button></span>`:'';
+  const plan=a.plan||cached?.plan,name=accountName(p,a),label=`${names[p]} · ${name}`;
+  const nav=count>1?`<span class="nav-group"><button class="nav" data-action="prev" data-provider="${esc(p)}" data-key="${esc(p)}:prev" aria-label="Previous ${names[p]} account" title="Previous account">${icon('prev')}</button><span class="count"><span aria-hidden="true">${index+1}/${count}</span><span class="sr-only">${index+1} of ${count}</span></span><button class="nav" data-action="next" data-provider="${esc(p)}" data-key="${esc(p)}:next" aria-label="Next ${names[p]} account" title="Next account">${icon('next')}</button></span>`:'';
   const head=`<div class="card-head"><div class="glyph"><img src="${esc(iconSrc(p))}" alt=""></div><h2 class="brand" id="${esc(p)}-name">${names[p]}</h2><span class="spacer"></span>${nav}</div>`;
   const badge=isDefault?'<span class="badge" title="New terminals use this account">Active</span>':'';
   const identity=`<div class="identity"><span class="email" id="${esc(p)}-account" title="${esc(`${name} · saved in ${folderOf(p,id)}`)}">${esc(name)}</span>${plan?`<span class="plan">${esc(plan)}</span>`:''}${badge}</div>`;
@@ -303,7 +310,7 @@ function rotate(p,step){
   const g=lastData&&groups(lastData).find(x=>x.source===p);if(!g||g.accounts.length<2)return;
   const i=Math.max(0,g.accounts.findIndex(a=>a.id===carouselPos[p])),j=(i+step+g.accounts.length)%g.accounts.length;
   carouselPos[p]=g.accounts[j].id;carouselIdx[p]=j;render(p,step);
-  announce(`${names[p]} account ${j+1} of ${g.accounts.length}: ${accountName(p,g.accounts[j])}`);
+  announce(`${names[p]} ${j+1} of ${g.accounts.length}: ${accountName(p,g.accounts[j])}`);
 }
 function remember(data){for(const [p,info] of Object.entries(data.providers||{}))for(const a of info?.accounts||[])if(statusOf(a)!=='unknown'&&a.windows&&Object.keys(a.windows).length)lastGood[`${p}:${a.id}`]={windows:a.windows,email:a.email,plan:a.plan}}
 

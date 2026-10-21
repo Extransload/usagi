@@ -15,7 +15,7 @@ Needs macOS 14 or later and the Claude Code or Codex CLI ([requirements](#requir
 
 <img src="docs/screenshot.png" width="380" alt="Usagi menu with a Claude card and a Codex card showing 5-hour, weekly and model limits, when each reading was updated and when each limit resets">
 
-- A rabbit icon or your usage percentages appear in the menu bar: one per service (Claude, Codex), for the account marked **Active**. Click it to open the account cards; right-click it for **Refresh Now**, **Check for Updates**, **Menu Bar Shows** (how many services to show before a "+N") and **Quit Usagi**.
+- A rabbit icon or your usage percentages appear in the menu bar: one per service (Claude, Codex), for the account marked **Active** (or the service's first card when that account is hidden). Click it to open the account cards; right-click it for **Refresh Now**, **Check for Updates**, **Menu Bar Shows** (1, 2 or all services before a "+N") and **Quit Usagi**.
 - To start Usagi when you log in, add it under **System Settings > General > Login Items**.
 - Usagi is not signed or notarized by Apple. So that it opens right away, the Homebrew install removes the macOS quarantine flag. That skips Apple's check, so install it only if you trust this repository. From 1.0.3 on, every release zip is built by GitHub Actions and can be checked with `gh attestation verify` ([SECURITY.md](SECURITY.md)).
 
@@ -47,7 +47,7 @@ Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the C
 
 ## Usage
 
-- On first launch, the CLI accounts you are already signed in to (`default`) appear as cards. With none, the menu tells you what to install or offers **Add account**.
+- On first launch, the CLI accounts you are already signed in to appear as cards. With none, the menu tells you what to install or offers **Add account**.
 - **＋** then Claude or Codex adds an account card. Usagi shows a hidden existing account if there is one; otherwise it creates a new profile such as `account-2` (`~/.claude-account-2`, `~/.codex-account-2`).
 - The sign-in button opens the official CLI sign-in in your browser. While it is open the card shows **Waiting for sign-in in your browser…** and the button becomes **Reopen sign-in**; if sign-in fails or times out (after 10 minutes), the card says why. On a signed-in card the same button is **Sign in again**.
 - When a service has several accounts, flip through them with **‹ ›** at the top right of the card, a horizontal trackpad swipe, or the arrow keys. Accounts are shown by email (an account that isn't signed in yet is "Account 2" and so on; hover to see its profile folder). The account you had before Usagi comes first, and the account new terminals use is marked **Active**.
@@ -102,7 +102,7 @@ Checked on the developer's Mac on 2026-10-21.
 
 Checked:
 
-- 96 Python tests, 181 Swift checks, and 242 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
+- 96 Python tests, 184 Swift checks, and 242 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
 - Reading Claude Max 20x, Codex Team and Codex Free accounts with the short `PATH` an app opened from Finder gets
 - A CLI installed the npm way (a `#!/usr/bin/env node` script next to its own `node` under `~/.nvm`, simulated with a stand-in CLI) found and run without Node on `PATH`
 - Starting with an empty home folder: no cards, an onboarding card, and the bridge's answers for signed-out and missing CLIs

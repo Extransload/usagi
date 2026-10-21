@@ -65,17 +65,19 @@ enum Updates {
         return image
     }()
 
+    private let servicesMenu = NSMenu()
+    private var requestedHeight: Double = 540
+
     private lazy var menu: NSMenu = {
         let menu = NSMenu()
         menu.addItem(withTitle: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "r").target = self
         menu.addItem(withTitle: "Check for Updates", action: #selector(checkForUpdatesNow), keyEquivalent: "").target = self
-        let shows = NSMenu()
-        for (title, value) in [("1 Service", 1), ("2 Services", 2), ("3 Services", 3), ("All Services", 0)] {
-            let item = shows.addItem(withTitle: title, action: #selector(setMenuBarServices(_:)), keyEquivalent: "")
+        for (title, value) in [("1 Service", 1), ("2 Services", 2), ("All Services", 0)] {
+            let item = servicesMenu.addItem(withTitle: title, action: #selector(setMenuBarServices(_:)), keyEquivalent: "")
             item.target = self
             item.tag = value
         }
-        menu.addItem(withTitle: "Menu Bar Shows", action: nil, keyEquivalent: "").submenu = shows
+        menu.addItem(withTitle: "Menu Bar Shows", action: nil, keyEquivalent: "").submenu = servicesMenu
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Usagi", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q").target = NSApp
         return menu
@@ -102,11 +104,11 @@ enum Updates {
         controller.onStatus = { [weak self] in self?.updateStatus() }
         controller.onCheckUpdates = { [weak self] in self?.checkForUpdate(force: true) }
         controller.onResize = { [weak self] height in
-            guard let self else { return }
-            let screen = self.statusItem.button?.window?.screen ?? NSScreen.main
-            let fitted = PopoverHeight.fit(Double(height), available: screen.map { Double($0.visibleFrame.height) })
-            self.popover.contentSize = NSSize(width: 380, height: fitted)
+            self?.requestedHeight = Double(height)
+            self?.fitPopover()
         }
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil,
+                                               queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.fitPopover() } }
         popover = NSPopover()
         popover.contentViewController = controller
         popover.contentSize = NSSize(width: 380, height: 540)
@@ -125,14 +127,30 @@ enum Updates {
             showMenu()
         } else if popover.isShown {
             popover.performClose(nil)
-        } else if let button = statusItem.button {
-            NSApp.activate()
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            // Key even when the system declines the activation, so Escape and the arrow keys reach the page.
-            controller.view.window?.makeKey()
+        } else {
+            showPopover()
             refreshIcons()
             checkForUpdate()
         }
+    }
+
+    /// The page's full height, fitted to the space below the menu bar on the screen the status item is on
+    /// (refitted before every open, so a smaller screen or a moved Dock never gets a too-tall popover).
+    private func fitPopover() {
+        let window = statusItem.button?.window
+        let available = (window?.screen ?? NSScreen.main).map { screen in
+            Double(window.map { $0.frame.minY - screen.visibleFrame.minY } ?? screen.visibleFrame.height)
+        }
+        popover.contentSize = NSSize(width: 380, height: PopoverHeight.fit(requestedHeight, available: available))
+    }
+
+    private func showPopover() {
+        guard !popover.isShown, let button = statusItem.button else { return }
+        fitPopover()
+        NSApp.activate()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // Key even when the system declines the activation, so Escape and the arrow keys reach the page.
+        controller.view.window?.makeKey()
     }
 
     /// How many services the menu bar shows before "+N" (UserDefaults; 0 = all).
@@ -147,7 +165,7 @@ enum Updates {
 
     private func showMenu() {
         let chosen = serviceLimit ?? 0
-        menu.items.first { $0.submenu != nil }?.submenu?.items.forEach { $0.state = $0.tag == chosen ? .on : .off }
+        servicesMenu.items.forEach { $0.state = $0.tag == chosen ? .on : .off }
         if popover.isShown { popover.performClose(nil) }
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
@@ -159,11 +177,7 @@ enum Updates {
     /// From the right-click menu: open the menu and let the page start the check, as a click on its footer
     /// does, so "Checking…", "Up to date", the banner or "Couldn't check" show there.
     @objc private func checkForUpdatesNow() {
-        if !popover.isShown, let button = statusItem.button {
-            NSApp.activate()
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            controller.view.window?.makeKey()
-        }
+        showPopover()
         controller.checkForUpdatesFromMenu()
     }
 
@@ -192,7 +206,7 @@ enum Updates {
         Updates.check(force: force) { [weak self] info in self?.controller.setUpdate(info) }
     }
 
-    /// Up to two cards' usage with provider icons, or the rabbit when there are no cards. Dimmed (and
+    /// One item per service (its Active account) up to the Menu Bar Shows limit, or the rabbit when there are no cards. Dimmed (and
     /// "not up to date" for VoiceOver) when the last refresh failed or the last success is older than 15 minutes.
     private func updateStatus() {
         guard let button = statusItem.button else { return }

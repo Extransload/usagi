@@ -24,7 +24,7 @@ enum PopoverHeight {
 
     static func fit(_ requested: Double, available: Double?) -> Double {
         guard let available, available > 0 else { return max(minimum, min(requested, 540)) }
-        return max(minimum, min(requested, available - screenMargin))
+        return min(available, max(minimum, min(requested, available - screenMargin)))
     }
 }
 
@@ -93,8 +93,10 @@ enum MenuBar {
         let all = order.map { provider -> MenuBarItem in
             let info = providers[provider] as? [String: Any] ?? [:]
             let shown = cards.filter { $0["provider"] as? String == provider }.compactMap { $0["id"] as? String }
-            let id = (info["active"] as? String).flatMap { shown.contains($0) ? $0 : nil } ?? shown.first
             let accounts = info["accounts"] as? [[String: Any]] ?? []
+            // The Active account, else the first shown card in the page's order (the accounts list is sorted).
+            let id = (info["active"] as? String).flatMap { shown.contains($0) ? $0 : nil }
+                ?? accounts.compactMap { $0["id"] as? String }.first(where: shown.contains) ?? shown.first
             let windows = accounts.first { $0["id"] as? String == id }?["windows"] as? [String: Any] ?? [:]
             return MenuBarItem(provider: provider, percent: usedPercent(windows).flatMap(clampPercent))
         }
@@ -105,7 +107,7 @@ enum MenuBar {
     /// The stored "Menu Bar Shows" choice: 0 (or anything unknown) means all services.
     static func serviceLimit(stored: Int?) -> Int? {
         guard let stored else { return defaultServiceLimit }
-        return (1...3).contains(stored) ? stored : nil
+        return (1...2).contains(stored) ? stored : nil
     }
 
     /// The higher of the 5-hour and weekly windows, else the highest of any window.
