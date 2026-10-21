@@ -82,7 +82,9 @@ enum Network {
             if let last = attempted[provider], now.timeIntervalSince(last) < 3600 { continue }
             let file = self.file(provider)
             let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            if let modified, now.timeIntervalSince(modified) < maxAge, webIcon(provider) != nil { continue }
+            // A fresh file is read and decoded only when no rendered tile is in memory.
+            if let modified, now.timeIntervalSince(modified) < maxAge,
+               entries[provider]?.tile != nil || webIcon(provider) != nil { continue }
             downloading.insert(provider)
             attempted[provider] = now
             Task {

@@ -39,7 +39,8 @@ enum PageMessage: Equatable {
         let provider = (fields["provider"] as? String).flatMap { providers.contains($0) ? $0 : nil }
         let account = (fields["account"] as? String).flatMap { isAccount($0) ? $0 : nil }
         switch action {
-        case "snapshot", "update": return .bridge([action])
+        case "snapshot": return .bridge(Job.userRefresh)
+        case "update": return .bridge([action])
         case "quit": return .quit
         case "resize":
             guard let text = fields["height"] as? String, let height = Double(text), height.isFinite else { return nil }
@@ -99,8 +100,8 @@ enum MenuBar {
         return String(repeating: figureSpace, count: max(0, 3 - digits.count)) + digits + "%"
     }
 
-    static func suffix(more: Int, stale: Bool) -> String {
-        (more > 0 ? "  +\(more)" : "") + (stale ? " !" : "")
+    static func suffix(more: Int) -> String {
+        more > 0 ? "  +\(more)" : ""
     }
 
     static func accessibilityLabel(_ items: [MenuBarItem], more: Int, stale: Bool) -> String {
@@ -135,14 +136,44 @@ enum Cadence {
 
 enum JobOrigin { case user, followUp, background }
 
+/// The page's actionDone message: the action with its provider and account, without options like --ask-shell.
+struct ActionDone: Equatable {
+    var action: String
+    var provider: String?
+    var account: String?
+    var ok: Bool
+
+    init(_ arguments: [String], ok: Bool) {
+        let fields = arguments.filter { !$0.hasPrefix("-") }
+        action = fields.first ?? ""
+        provider = fields.count > 1 ? fields[1] : nil
+        account = fields.count > 2 ? fields[2] : nil
+        self.ok = ok
+    }
+
+    var json: [String: Any] {
+        ["action": action, "provider": provider ?? NSNull(), "account": account ?? NSNull(), "ok": ok]
+    }
+}
+
 struct Job: Equatable {
+    /// The refresh button may ask the login shell where a missing CLI is; automatic refreshes never do.
+    static let refresh = ["snapshot"], userRefresh = ["snapshot", "--ask-shell"]
+
     var arguments: [String]
     var origin: JobOrigin
+    /// actionDone messages held back until this job has finished (a sign-in waits for its follow-up snapshot).
+    var reports: [ActionDone] = []
+
+    /// Both kinds of snapshot count as the same job.
+    var key: [String] { arguments.first == "snapshot" ? Job.refresh : arguments }
 }
 
 /// One bridge run at a time. User actions go first, follow-up refreshes next; background
 /// refreshes are dropped while anything runs. A job identical to one running or queued is
-/// dropped, and a user request turns the existing job into a user job so it still reports back.
+/// dropped and its held-back reports move to that job; a user request turns a queued job into
+/// the user's (a refresh-button snapshot with --ask-shell) and a running one into a user job,
+/// so it still reports back.
 struct JobQueue {
     private(set) var running: Job?
     private(set) var waiting: [Job] = []
@@ -151,14 +182,19 @@ struct JobQueue {
 
     @discardableResult
     mutating func add(_ job: Job) -> Bool {
-        if running?.arguments == job.arguments {
-            if job.origin == .user { running?.origin = .user }
+        if var current = running, current.key == job.key {
+            if job.origin == .user { current.origin = .user }
+            current.reports += job.reports
+            running = current
             return false
         }
-        if let index = waiting.firstIndex(where: { $0.arguments == job.arguments }) {
+        if let index = waiting.firstIndex(where: { $0.key == job.key }) {
             if job.origin == .user && waiting[index].origin != .user {
-                waiting.remove(at: index)
-                insertUser(job)
+                var promoted = job
+                promoted.reports = waiting.remove(at: index).reports + job.reports
+                insertUser(promoted)
+            } else {
+                waiting[index].reports += job.reports
             }
             return false
         }
@@ -192,6 +228,8 @@ struct AccountKey: Hashable {
 /// dropped once a snapshot shows them gone or no longer connecting.
 struct LoginWatches {
     static let interval: TimeInterval = 3, limit: TimeInterval = 11 * 60, retry: TimeInterval = 30
+    /// The repeating 3 s timer can fire a little before `next`; without slack every other tick would be skipped.
+    static let slack: TimeInterval = 1
 
     struct Watch: Equatable {
         var started: Date
@@ -221,7 +259,9 @@ struct LoginWatches {
     }
 
     mutating func due(now: Date) -> AccountKey? {
-        let ready = watches.filter { now >= $0.value.next && now.timeIntervalSince($0.value.started) < Self.limit }
+        let ready = watches.filter {
+            now.addingTimeInterval(Self.slack) >= $0.value.next && now.timeIntervalSince($0.value.started) < Self.limit
+        }
         guard let entry = ready.min(by: { ($0.value.next, $0.key.provider, $0.key.account)
                                             < ($1.value.next, $1.key.provider, $1.key.account) }) else { return nil }
         watches[entry.key]?.next = now.addingTimeInterval(Self.interval)
@@ -257,6 +297,22 @@ struct UpdateSchedule {
         inFlight = false
         next = now.addingTimeInterval(success ? Self.interval : Self.retry)
     }
+}
+
+/// Reloads after the page's WebContent process crashed: at most 3 a minute, then none until the popover opens.
+struct CrashReloads {
+    static let limit = 3, window: TimeInterval = 60
+    private(set) var recent: [Date] = []
+
+    mutating func allow(now: Date) -> Bool {
+        recent = recent.filter { now.timeIntervalSince($0) < Self.window } + [now]
+        return recent.count <= Self.limit
+    }
+}
+
+enum SingleInstance {
+    /// Another copy (say a Homebrew and a source install) is already running at our launch: this one quits.
+    static func shouldQuit(own: Int32, running: [Int32]) -> Bool { running.contains { $0 != own } }
 }
 
 enum PNG {

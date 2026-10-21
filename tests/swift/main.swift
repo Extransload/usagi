@@ -31,7 +31,7 @@ check(!Version.newer("1.0.3-beta", than: "1.0.3"), "suffix ignored")
 equal(Version.parts("v1.2.3"), [1, 2, 3], "parts")
 
 // Page messages
-equal(PageMessage.parse(["action": "snapshot"]), .bridge(["snapshot"]), "snapshot")
+equal(PageMessage.parse(["action": "snapshot"]), .bridge(["snapshot", "--ask-shell"]), "refresh button asks the shell")
 equal(PageMessage.parse(["action": "update"]), .bridge(["update"]), "update")
 equal(PageMessage.parse(["action": "quit"]), .quit, "quit")
 equal(PageMessage.parse(["action": "select", "provider": "claude", "account": "default"]),
@@ -103,8 +103,8 @@ equal(MenuBar.percentText(42), fs + "42%", "pads two digits")
 equal(MenuBar.percentText(100), "100%", "three digits")
 equal(MenuBar.percentText(nil), fs + fs + "–" + fs, "no data")
 equal(MenuBar.percentText(5).count, MenuBar.percentText(nil).count, "same width with and without data")
-equal(MenuBar.suffix(more: 0, stale: false), "", "no suffix")
-equal(MenuBar.suffix(more: 2, stale: true), "  +2 !", "more and stale")
+equal(MenuBar.suffix(more: 0), "", "no suffix")
+equal(MenuBar.suffix(more: 2), "  +2", "more, no stale marker")
 equal(MenuBar.accessibilityLabel(menu.items, more: 1, stale: false), "Usagi: Claude 42%, Codex 12%, 1 more", "a11y label")
 equal(MenuBar.accessibilityLabel([MenuBarItem(provider: "codex", percent: nil)], more: 0, stale: true),
       "Usagi: Codex no data (not up to date)", "a11y no data, stale")
@@ -149,6 +149,47 @@ _ = queue.finish()
 _ = queue.start(); _ = queue.finish(); _ = queue.start(); _ = queue.finish()
 check(!queue.isBusy, "drained")
 
+// Refresh button (--ask-shell) and automatic snapshots are one job
+queue = JobQueue()
+_ = queue.add(Job(arguments: ["select", "claude", "a"], origin: .user)); _ = queue.start()
+check(queue.add(Job(arguments: Job.refresh, origin: .followUp)), "plain snapshot queued")
+check(!queue.add(Job(arguments: Job.userRefresh, origin: .user)), "refresh button joins the queued snapshot")
+equal(queue.waiting, [Job(arguments: Job.userRefresh, origin: .user)], "queued snapshot becomes the refresh button's")
+check(!queue.add(Job(arguments: Job.refresh, origin: .followUp)), "plain snapshot joins the refresh button's")
+equal(queue.waiting.first?.arguments, Job.userRefresh, "still asks the shell")
+_ = queue.finish(); _ = queue.start()
+check(!queue.add(Job(arguments: Job.refresh, origin: .background)), "running refresh-button snapshot absorbs a background one")
+_ = queue.finish()
+_ = queue.add(Job(arguments: Job.refresh, origin: .background)); _ = queue.start()
+check(!queue.add(Job(arguments: Job.userRefresh, origin: .user)), "refresh button while a plain snapshot runs")
+equal(queue.running, Job(arguments: Job.refresh, origin: .user), "the running snapshot reports back")
+_ = queue.finish()
+
+// Held-back actionDone reports move with the job they were attached to
+let loginDone = ActionDone(["login", "claude", "a"], ok: true)
+_ = queue.add(Job(arguments: ["select", "claude", "a"], origin: .user)); _ = queue.start()
+check(queue.add(Job(arguments: Job.userRefresh, origin: .user)), "refresh queued")
+check(!queue.add(Job(arguments: Job.refresh, origin: .followUp, reports: [loginDone])), "sign-in follow-up joins it")
+equal(queue.waiting.first?.reports, [loginDone], "report waits on the queued snapshot")
+_ = queue.finish(); _ = queue.start()
+check(!queue.add(Job(arguments: Job.refresh, origin: .followUp, reports: [ActionDone(["login", "codex", "b"], ok: true)])),
+      "follow-up joins the running snapshot")
+equal(queue.finish()?.reports.map { $0.provider }, ["claude", "codex"], "finished job carries both reports")
+_ = queue.add(Job(arguments: Job.refresh, origin: .followUp)); _ = queue.start()
+_ = queue.add(Job(arguments: ["remove", "claude", "a"], origin: .user))
+check(!queue.add(Job(arguments: Job.userRefresh, origin: .user, reports: [loginDone])) && queue.running?.reports == [loginDone],
+      "reports join a running job")
+check(queue.add(Job(arguments: Job.refresh, origin: .followUp, reports: [loginDone])) == false, "dropped as a duplicate")
+equal(queue.running?.reports.count, 2, "but its report is kept")
+check(!queue.add(Job(arguments: ["remove", "claude", "a"], origin: .followUp, reports: [loginDone]))
+      && queue.waiting.first?.reports == [loginDone], "reports join a queued user job")
+
+// actionDone payload
+equal(ActionDone(Job.userRefresh, ok: true), ActionDone(["snapshot"], ok: true), "options left out")
+let done = ActionDone(["login", "codex", "account-2"], ok: false)
+equal([done.action, done.provider, done.account], ["login", "codex", "account-2"], "fields")
+check(done.json["ok"] as? Bool == false && ActionDone(["update"], ok: true).json["provider"] is NSNull, "json")
+
 // Login watches
 var watches = LoginWatches()
 let claude = AccountKey(provider: "claude", account: "default"), codex = AccountKey(provider: "codex", account: "account-2")
@@ -160,6 +201,7 @@ func connecting(_ pairs: [(String, String, Bool)]) -> [String: Any] {
 watches.start(claude, now: t0)
 check(watches.isActive(now: t0), "active after login")
 equal(watches.due(now: t0), nil, "not due before 3 s")
+equal(watches.due(now: t0 + 1.9), nil, "not due well before 3 s")
 equal(watches.due(now: t0 + 3), claude, "due at 3 s")
 equal(watches.due(now: t0 + 4), nil, "polled, next in 3 s")
 watches.reconcile(connecting([("claude", "default", true), ("codex", "account-2", true)]), now: t0 + 4)
@@ -181,6 +223,27 @@ check(!watches.isActive(now: t0 + 660), "gives up after 11 minutes")
 equal(watches.due(now: t0 + 700), nil, "no polling after giving up")
 watches.reconcile(connecting([("codex", "default", true)]), now: t0 + 700)
 check(!watches.isActive(now: t0 + 700), "a later snapshot doesn't restart it")
+
+var early = LoginWatches()
+early.start(claude, now: t0)
+var polls: [Date] = []
+for tick in 1...6 {  // a 3 s timer whose fires drift a little either way
+    let now = t0 + Double(tick) * 3 + (tick % 2 == 0 ? -0.2 : 0.3)
+    if early.due(now: now) != nil { polls.append(now) }
+}
+equal(polls.count, 6, "every 3 s tick polls, even one a little early")
+
+// Crash reloads
+var reloads = CrashReloads()
+check(reloads.allow(now: t0) && reloads.allow(now: t0 + 10) && reloads.allow(now: t0 + 20), "three a minute")
+check(!reloads.allow(now: t0 + 30), "not a fourth")
+check(!reloads.allow(now: t0 + 61), "still three within the last minute")
+check(reloads.allow(now: t0 + 200), "allowed again later")
+
+// Single instance
+check(!SingleInstance.shouldQuit(own: 10, running: [10]), "only this copy")
+check(!SingleInstance.shouldQuit(own: 10, running: []), "not listed yet")
+check(SingleInstance.shouldQuit(own: 10, running: [7, 10]), "another copy runs")
 
 // Update check schedule
 var updates = UpdateSchedule()

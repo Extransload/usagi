@@ -73,6 +73,15 @@ enum Updates {
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A Homebrew and a source install can both be started: the copy already running wins. An update
+        // isn't affected, because Homebrew quits the old copy before the new one opens.
+        if let id = Bundle.main.bundleIdentifier {
+            let running = NSRunningApplication.runningApplications(withBundleIdentifier: id).filter { !$0.isTerminated }
+            if SingleInstance.shouldQuit(own: getpid(), running: running.map(\.processIdentifier)) {
+                NSApp.terminate(nil)
+                return
+            }
+        }
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = Self.rabbit
@@ -103,6 +112,8 @@ enum Updates {
         } else if let button = statusItem.button {
             NSApp.activate()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // Key even when the system declines the activation, so Escape and the arrow keys reach the page.
+            controller.view.window?.makeKey()
             refreshIcons()
             checkForUpdate()
         }
@@ -116,6 +127,9 @@ enum Updates {
     }
 
     @objc private func refreshNow() { controller.refresh(.user) }
+
+    /// Quit Usagi (menu or page) ends here too: don't leave a bridge run behind.
+    func applicationWillTerminate(_ notification: Notification) { Bridge.stopAll() }
 
     func popoverDidShow(_ notification: Notification) {
         statusItem.button?.highlight(true)
@@ -139,8 +153,8 @@ enum Updates {
         Updates.check { [weak self] info in self?.controller.setUpdate(info) }
     }
 
-    /// Up to two cards' usage with provider icons, or the rabbit when there are no cards. Dimmed with a
-    /// marker when the last refresh failed or the last success is older than 15 minutes.
+    /// Up to two cards' usage with provider icons, or the rabbit when there are no cards. Dimmed (and
+    /// "not up to date" for VoiceOver) when the last refresh failed or the last success is older than 15 minutes.
     private func updateStatus() {
         guard let button = statusItem.button else { return }
         let stale = MenuBar.isStale(lastSuccess: controller.lastSuccess, failed: controller.lastError != nil, now: Date())
@@ -165,7 +179,7 @@ enum Updates {
             }
             label.append(NSAttributedString(string: MenuBar.percentText(item.percent)))
         }
-        label.append(NSAttributedString(string: MenuBar.suffix(more: more, stale: stale)))
+        label.append(NSAttributedString(string: MenuBar.suffix(more: more)))
         var attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)]
         if stale { attributes[.foregroundColor] = NSColor.secondaryLabelColor }
         label.addAttributes(attributes, range: NSRange(location: 0, length: label.length))

@@ -9,6 +9,7 @@ struct BridgeFailure: Error {
 enum Bridge {
     static let timeout: TimeInterval = 60
     static let setupMessage = "Install the Command Line Tools: run xcode-select --install in Terminal"
+    private static let groups = RunningGroups()
 
     static func run(_ arguments: [String], checkTools: Bool, qos: DispatchQoS.QoSClass,
                     timeout: TimeInterval = Bridge.timeout) async -> Result<Data, BridgeFailure> {
@@ -35,6 +36,19 @@ enum Bridge {
             && FileManager.default.isExecutableFile(atPath: folder + "/usr/bin/python3")
     }
 
+    /// Quitting: SIGTERM the process group of every run in flight (bridge.py then stops its CLI children),
+    /// wait up to `wait` seconds for them to exit, SIGKILL what is left. Runs started later are stopped at once.
+    static func stopAll(wait: TimeInterval = 3) {
+        var alive = groups.close()
+        for group in alive { kill(-group, SIGTERM) }
+        let deadline = Date().addingTimeInterval(wait)
+        while !alive.isEmpty && Date() < deadline {
+            usleep(50_000)
+            alive = alive.filter { kill(-$0, 0) == 0 }
+        }
+        for group in alive { kill(-group, SIGKILL) }
+    }
+
     private static func runNow(_ arguments: [String], checkTools: Bool, timeout: TimeInterval) -> Result<Data, BridgeFailure> {
         if checkTools && !toolsInstalled() { return .failure(BridgeFailure(message: setupMessage, setup: true)) }
         guard let script = Bundle.main.url(forResource: "bridge", withExtension: "py") else {
@@ -54,6 +68,8 @@ enum Bridge {
         }
         // Process makes the child a process group leader, so -pid reaches bridge.py and its CLI children.
         let group = process.processIdentifier
+        if !groups.insert(group) { kill(-group, SIGTERM) }
+        defer { groups.remove(group) }
         var timedOut = false
         if exited.wait(timeout: .now() + timeout) == .timedOut {
             timedOut = true
@@ -78,6 +94,35 @@ enum Bridge {
             return .failure(BridgeFailure(message: "The usage reader returned an unexpected response."))
         }
         return .success(stdout)
+    }
+}
+
+/// Process groups of the bridge runs in flight; closed once the app quits.
+private final class RunningGroups: @unchecked Sendable {
+    private let lock = NSLock()
+    private var groups: Set<pid_t> = []
+    private var closed = false
+
+    /// False once closed: the caller stops its group itself.
+    func insert(_ group: pid_t) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if !closed { groups.insert(group) }
+        return !closed
+    }
+
+    func remove(_ group: pid_t) {
+        lock.lock()
+        groups.remove(group)
+        lock.unlock()
+    }
+
+    /// The groups still running; later inserts fail.
+    func close() -> Set<pid_t> {
+        lock.lock()
+        defer { lock.unlock() }
+        closed = true
+        return groups
     }
 }
 
