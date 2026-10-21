@@ -24,7 +24,7 @@ the tests and shows the state of the tag, the GitHub release and the cask.
 | # | Step | What it does | When rerun |
 |---|---|---|---|
 | 1 | Preflight | Branch, clean tree, `origin/main`, `gh auth status`, push access to both repositories, the CHANGELOG section, X.Y.Z greater than the version in `Info.plist` (`sort -V`), and a passing CI run for the commit being released (it waits if CI is still running) | Repeated |
-| 2 | Tests | `/usr/bin/python3 -m unittest discover -s tests` and `tests/swift/run.sh` | Skipped once the tag exists |
+| 2 | Tests | `/usr/bin/python3 -m unittest discover -s tests` and `tests/swift/run.sh` | Skipped once the tag exists, or when resuming from the bump commit |
 | 3 | Bump and tag | `plutil -replace` of `CFBundleShortVersionString` and `CFBundleVersion` (+1) in `Info.plist`, commit `Release X.Y.Z`, annotated tag `vX.Y.Z` | Skipped if `vX.Y.Z` is at HEAD; stops if it points anywhere else |
 | 4 | Push | `git push --atomic origin main vX.Y.Z` | No-op when already pushed |
 | 5 | Build | The tag starts `.github/workflows/release.yml` on a `macos-15` runner: tests, `./build.sh`, `.github/verify-app.sh` (version, arm64 + x86_64, minimum macOS 14.0, signature with hardened runtime), zip with `ditto`, build provenance attestation, then a **draft** release with the CHANGELOG section, the Swift version and the runner image in the notes. `release.sh` follows it with `gh run watch` | Skipped when the draft already has the zip |

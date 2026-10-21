@@ -311,8 +311,15 @@ struct CrashReloads {
 }
 
 enum SingleInstance {
-    /// Another copy (say a Homebrew and a source install) is already running at our launch: this one quits.
-    static func shouldQuit(own: Int32, running: [Int32]) -> Bool { running.contains { $0 != own } }
+    /// Another copy (say a Homebrew and a source install) is running: the one launched first stays, and when
+    /// two start at the same moment the lower pid stays, so exactly one survives.
+    static func shouldQuit(own: (pid: Int32, launched: Date?), running: [(pid: Int32, launched: Date?)]) -> Bool {
+        running.contains { other in
+            guard other.pid != own.pid else { return false }
+            if let theirs = other.launched, let ours = own.launched, theirs != ours { return theirs < ours }
+            return other.pid < own.pid
+        }
+    }
 }
 
 enum PNG {

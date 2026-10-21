@@ -73,11 +73,12 @@ enum Updates {
     }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // A Homebrew and a source install can both be started: the copy already running wins. An update
+        // A Homebrew and a source install can both be started: the copy launched first wins. An update
         // isn't affected, because Homebrew quits the old copy before the new one opens.
         if let id = Bundle.main.bundleIdentifier {
             let running = NSRunningApplication.runningApplications(withBundleIdentifier: id).filter { !$0.isTerminated }
-            if SingleInstance.shouldQuit(own: getpid(), running: running.map(\.processIdentifier)) {
+            if SingleInstance.shouldQuit(own: (getpid(), NSRunningApplication.current.launchDate),
+                                         running: running.map { ($0.processIdentifier, $0.launchDate) }) {
                 NSApp.terminate(nil)
                 return
             }

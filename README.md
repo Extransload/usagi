@@ -43,13 +43,13 @@ Zap does not touch your Claude Code and Codex profiles (`~/.claude*`, `~/.codex*
 | Browser | Sign-in opens in Google Chrome when it is installed, otherwise in your default browser |
 | Shell | Account switching for new terminals works in zsh and bash |
 
-Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the CLIs itself, in this order: `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `~/.volta/bin`, `~/.claude/local`, `~/Library/pnpm`, `~/.yarn/bin`, `~/.asdf/shims`, `~/.local/share/mise/shims`, then the newest nvm and fnm Node versions. If none of these has it, Usagi asks your login shell once (`$SHELL -ilc 'command -v claude'`) and remembers the answer. CLIs installed with npm run with their own Node, even when Node isn't on the app's `PATH`.
+Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the CLIs itself, in this order: `PATH`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `~/.volta/bin`, `~/.claude/local`, `~/Library/pnpm`, `~/.yarn/bin`, `~/.asdf/shims`, `~/.local/share/mise/shims`, then the newest nvm and fnm Node versions. If none of these has it, Usagi asks your login shell (`$SHELL -ilc 'command -v claude'`) when you press refresh, sign in or add an account, and remembers the answer; background refreshes never start your shell. CLIs installed with npm run with their own Node, even when Node isn't on the app's `PATH`.
 
 ## Usage
 
 - On first launch, the CLI accounts you are already signed in to (`default`) appear as cards. With none, the menu tells you what to install or offers **Add account**.
 - **＋** then Claude or Codex adds an account card. Usagi shows a hidden existing account if there is one; otherwise it creates a new profile such as `account-2` (`~/.claude-account-2`, `~/.codex-account-2`).
-- The sign-in button opens the official CLI sign-in in your browser. While it is open the card shows **Connecting…**; if sign-in fails or times out (after 10 minutes), the card says why. On a signed-in card the same button is **Sign in again**.
+- The sign-in button opens the official CLI sign-in in your browser. While it is open the card shows **Waiting for sign-in in your browser…** and the button becomes **Reopen sign-in**; if sign-in fails or times out (after 10 minutes), the card says why. On a signed-in card the same button is **Sign in again**.
 - When a service has several accounts, flip through them with **‹ ›** at the top right of the card, a horizontal trackpad swipe, or the arrow keys. `default` comes first, and the account new terminals use is marked **Active**.
 - **Use in new terminals** (✓) picks that account for new terminals. To make it take effect, add this line to `~/.zshrc` (or `~/.bashrc`). It applies to `claude` and `codex` runs started afterwards, including new tmux panes; sessions already running keep their account.
 
@@ -68,7 +68,7 @@ Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the C
 - Usagi never reads or copies sign-in tokens. Sign-in uses `claude auth login` and the Codex app-server's own sign-in.
 - **Icons**: card and menu bar icons come from the Claude and ChatGPT apps when they are installed. If the Claude app isn't installed, Usagi downloads Claude's icon from claude.ai (PNG only, at most 1 MB, again after 30 days) and keeps it in `~/.config/usagi/icons`. Without either, Usagi shows plain C and X badges.
 - **Network**: apart from the CLIs it runs, Usagi itself only contacts `api.github.com` for the update check and claude.ai for that icon.
-- **Files Usagi writes**, all in `~/.config/usagi`: the card list (`cards.json`), the account new terminals use (`state/`), sign-in markers and the last sign-in error (`logins/`), where it found the CLIs (`cli-paths.json`), the Claude icon (`icons/`), and the last update's output (`update.log`, `update.lock`). New profiles are the folders `~/.claude-<name>` and `~/.codex-<name>`, which link to your shared settings, skills and hooks in `~/.claude` and `~/.codex`. A `settings.json` that contains an API key or `apiKeyHelper` is not linked, so each account signs in on its own.
+- **Files Usagi writes**, all in `~/.config/usagi`: the card list (`cards.json`), the account new terminals use (`state/`), sign-in markers and the last sign-in error (`logins/`), where it found the CLIs (`cli-paths.json`, `cli-paths.lock`), the Claude icon (`icons/`), and the last update's output (`update.log`, `update.lock`). New profiles are the folders `~/.claude-<name>` and `~/.codex-<name>`, which link to your shared settings, skills and hooks in `~/.claude` and `~/.codex`. A `settings.json` that carries credentials (an API key, `apiKeyHelper`, or Bedrock, Vertex or AWS settings), or that Usagi can't read, is not linked, so each account signs in on its own.
 - With the same account, the Claude apps, claude.ai and Claude Code share limits. Codex limits can also be shared with other Codex use on the same ChatGPT account.
 
 ## Troubleshooting
@@ -79,7 +79,7 @@ Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the C
 | The menu says the Command Line Tools are missing | Run `xcode-select --install`. Major macOS upgrades sometimes remove them. |
 | A card says the CLI was not found | Install the CLI, or check that it is in one of the folders under [Requirements](#requirements). If you moved it, delete `~/.config/usagi/cli-paths.json`. |
 | The rabbit isn't in the menu bar | On a Mac with a notch, other menu bar items can hide it; quit some, or on macOS 26 and later check **System Settings > Menu Bar**. |
-| Codex sign-in stays on Connecting… | Finish or close the browser tab. Sign-in gives up after 10 minutes; click the sign-in button again to restart it. |
+| Sign-in stays on "Waiting for sign-in in your browser…" | Finish or close the browser tab. Sign-in gives up after 10 minutes; click **Reopen sign-in** to start over. |
 | Claude numbers look old | Run Claude Code once; it refreshes the cache Usagi reads. |
 | **Update** didn't finish | Read `~/.config/usagi/update.log`, then run `brew upgrade --cask extransload/tap/usagi` in Terminal. |
 | A new terminal uses the wrong account | Check that the `usagi.zsh` line is in `~/.zshrc` or `~/.bashrc`, and open a new terminal. |
@@ -101,7 +101,7 @@ Checked on the developer's Mac on 2026-10-21.
 
 Checked:
 
-- 82 Python tests, 126 Swift checks, and 193 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
+- 96 Python tests, 159 Swift checks, and 204 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
 - Reading Claude Max 20x, Codex Team and Codex Free accounts with the short `PATH` an app opened from Finder gets
 - A CLI installed the npm way (a `#!/usr/bin/env node` script next to its own `node` under `~/.nvm`, simulated with a stand-in CLI) found and run without Node on `PATH`
 - Starting with an empty home folder: no cards, an onboarding card, and the bridge's answers for signed-out and missing CLIs

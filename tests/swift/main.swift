@@ -241,9 +241,14 @@ check(!reloads.allow(now: t0 + 61), "still three within the last minute")
 check(reloads.allow(now: t0 + 200), "allowed again later")
 
 // Single instance
-check(!SingleInstance.shouldQuit(own: 10, running: [10]), "only this copy")
-check(!SingleInstance.shouldQuit(own: 10, running: []), "not listed yet")
-check(SingleInstance.shouldQuit(own: 10, running: [7, 10]), "another copy runs")
+let firstLaunch = Date(timeIntervalSince1970: 1_000), laterLaunch = Date(timeIntervalSince1970: 2_000)
+check(!SingleInstance.shouldQuit(own: (10, laterLaunch), running: [(10, laterLaunch)]), "only this copy")
+check(!SingleInstance.shouldQuit(own: (10, laterLaunch), running: []), "not listed yet")
+check(SingleInstance.shouldQuit(own: (10, laterLaunch), running: [(70, firstLaunch), (10, laterLaunch)]), "an older copy runs")
+check(!SingleInstance.shouldQuit(own: (10, firstLaunch), running: [(7, laterLaunch), (10, firstLaunch)]), "a newer copy quits instead")
+check(SingleInstance.shouldQuit(own: (10, laterLaunch), running: [(7, laterLaunch), (10, laterLaunch)]), "same moment: lower pid stays")
+check(!SingleInstance.shouldQuit(own: (7, laterLaunch), running: [(7, laterLaunch), (10, laterLaunch)]), "same moment: this lower pid stays")
+check(SingleInstance.shouldQuit(own: (10, nil), running: [(7, nil), (10, nil)]), "no launch dates: lower pid stays")
 
 // Update check schedule
 var updates = UpdateSchedule()

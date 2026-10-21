@@ -2,7 +2,7 @@
 
 All notable changes to Usagi. Each `## X.Y.Z` section is used as the release notes for that version: `release.sh` and the Release workflow stop if the section is missing.
 
-## 1.0.3
+## 1.0.3 - 2026-10-21
 
 ### Fixed
 
@@ -12,7 +12,8 @@ All notable changes to Usagi. Each `## X.Y.Z` section is used as the release not
 - Unexpected or incomplete answers from the Codex app-server no longer break the Codex card.
 - Updates: only one update runs at a time, and copies installed from source open the release page instead of trying Homebrew.
 - The account switch in `usagi.zsh` also works inside tmux and in bash.
-- The menu bar no longer shows outdated numbers.
+- When the menu bar's numbers are out of date they are dimmed, and hovering shows why.
+- Only one copy of Usagi runs at a time, even with both a Homebrew and a source install.
 
 ### Changed
 
