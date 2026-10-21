@@ -18,11 +18,21 @@ enum Version {
     }
 }
 
+/// The popover grows with its content and only scrolls when that is taller than the screen allows.
+enum PopoverHeight {
+    static let minimum: Double = 260, screenMargin: Double = 24
+
+    static func fit(_ requested: Double, available: Double?) -> Double {
+        guard let available, available > 0 else { return max(minimum, min(requested, 540)) }
+        return max(minimum, min(requested, available - screenMargin))
+    }
+}
+
 enum PageMessage: Equatable {
     case bridge([String]), resize(Double), quit, checkUpdates
 
     static let providers: Set<String> = ["claude", "codex"]
-    static let heights: ClosedRange<Double> = 260...540
+    static let heights: ClosedRange<Double> = 260...4000
 
     static func isAccount(_ value: String) -> Bool {
         let scalars = Array(value.unicodeScalars)

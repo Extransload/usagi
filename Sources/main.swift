@@ -94,7 +94,12 @@ enum Updates {
         controller = UsageController()
         controller.onStatus = { [weak self] in self?.updateStatus() }
         controller.onCheckUpdates = { [weak self] in self?.checkForUpdate(force: true) }
-        controller.onResize = { [weak self] height in self?.popover.contentSize = NSSize(width: 380, height: height) }
+        controller.onResize = { [weak self] height in
+            guard let self else { return }
+            let screen = self.statusItem.button?.window?.screen ?? NSScreen.main
+            let fitted = PopoverHeight.fit(Double(height), available: screen.map { Double($0.visibleFrame.height) })
+            self.popover.contentSize = NSSize(width: 380, height: fitted)
+        }
         popover = NSPopover()
         popover.contentViewController = controller
         popover.contentSize = NSSize(width: 380, height: 540)

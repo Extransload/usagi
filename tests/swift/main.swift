@@ -42,7 +42,12 @@ equal(PageMessage.parse(["action": "remove", "provider": "codex", "account": "a"
       .bridge(["remove", "codex", "a" + String(repeating: "b", count: 30)]), "31 characters")
 equal(PageMessage.parse(["action": "add_auto", "provider": "claude"]), .bridge(["add_auto", "claude"]), "add_auto")
 equal(PageMessage.parse(["action": "resize", "height": "300"]), .resize(300), "resize")
-equal(PageMessage.parse(["action": "resize", "height": "1000"]), .resize(540), "resize clamps high")
+equal(PageMessage.parse(["action": "resize", "height": "1000"]), .resize(1000), "resize keeps a tall page")
+equal(PageMessage.parse(["action": "resize", "height": "9000"]), .resize(4000), "resize clamps absurd heights")
+equal(PopoverHeight.fit(700, available: 1000), 700, "fits on screen: no scrolling")
+equal(PopoverHeight.fit(1200, available: 900), 876, "taller than the screen: scroll inside")
+equal(PopoverHeight.fit(100, available: 900), 260, "minimum height")
+equal(PopoverHeight.fit(700, available: nil), 540, "no screen known: old cap")
 equal(PageMessage.parse(["action": "resize", "height": "12.5"]), .resize(260), "resize clamps low")
 for bad: [String: Any] in [
     ["action": "add", "provider": "claude", "account": "x"],

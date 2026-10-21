@@ -41,7 +41,7 @@ code{font:10px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--cont
 h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 .icon-button{width:28px;height:28px;border-radius:10px;padding:0;display:grid;place-items:center;flex:none;backdrop-filter:blur(16px)}
 .icon-button svg{width:16px;height:16px}
-#cards{flex:0 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0 -13px;padding:0 13px 2px}
+#cards{flex:0 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;margin:0 -13px;padding:0 13px 2px}
 #update,#error{flex:none}
 .card{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:11px 12px 9px;margin-bottom:7px;box-shadow:0 6px 18px var(--shadow);backdrop-filter:blur(20px) saturate(1.25)}
 .card.loading{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;padding:14px 12px}
@@ -289,7 +289,8 @@ addEventListener('resize',fitGutter);
 function measure(force){
   const cards=$('cards');
   fitGutter();
-  const height=Math.ceil(document.querySelector('.footer').getBoundingClientRect().bottom+9+Math.max(0,cards.scrollHeight-cards.clientHeight));
+  // The whole content height (+2 px against rounding): Swift fits the popover to it and to the screen.
+  const height=Math.ceil(document.querySelector('.footer').getBoundingClientRect().bottom+9+Math.max(0,cards.scrollHeight-cards.clientHeight))+2;
   if(force||height!==sentHeight){sentHeight=height;send('resize',{height})}
 }
 function announce(text){$('announce').textContent=text}
