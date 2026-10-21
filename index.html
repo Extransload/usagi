@@ -49,7 +49,7 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 @keyframes slide-right{from{opacity:.2;transform:translateX(16px)}}@keyframes slide-left{from{opacity:.2;transform:translateX(-16px)}}
 .card-head{display:flex;align-items:center;gap:8px;min-width:0}
 .movable .card-head{cursor:grab;-webkit-user-select:none;user-select:none}.movable .card-head img{-webkit-user-drag:none}.carousel{position:relative}.carousel.dragging{position:relative;z-index:2;cursor:grabbing}.carousel.dragging .card{box-shadow:0 14px 30px var(--shadow);transform:scale(1.015);background:var(--lift)}
-#cards.sorting .carousel:not(.dragging){transition:transform .18s ease}.card{transition:box-shadow .2s ease,transform .2s ease}@media(prefers-reduced-motion:reduce){#cards .carousel{transition:none!important}}
+#cards.sorting .carousel:not(.dragging){transition:transform .18s ease}.carousel.settling{z-index:2}.card{transition:box-shadow .2s ease,transform .2s ease}@media(prefers-reduced-motion:reduce){#cards .carousel{transition:none!important}}
 .glyph{width:26px;height:26px;border-radius:7px;overflow:hidden;flex:none}.glyph img{width:100%;height:100%;object-fit:cover;display:block}
 .brand{font-size:14px;font-weight:720;margin:0;flex:none}
 .nav-group{display:flex;flex:none;align-items:center;gap:3px}
@@ -497,17 +497,21 @@ function moveService(p,step){
 }
 // Cards glide to their new places: note where each one is drawn, make the change, then animate every card
 // from its old place to its new one (skipped with Reduce Motion).
+let flipTimer=null;
+function settle(){document.querySelectorAll('#cards .carousel').forEach(b=>{b.style.transition='';b.style.transform='';b.classList.remove('settling')})}
 function flip(change){
+  // Where each card is drawn now (mid-glide included), then its resting place after the change.
   const before=new Map([...document.querySelectorAll('#cards .carousel')].map(b=>[b.dataset.provider,b.getBoundingClientRect().top]));
   change();
-  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
-  for(const b of document.querySelectorAll('#cards .carousel')){
-    const old=before.get(b.dataset.provider),dy=old==null?0:old-b.getBoundingClientRect().top;
-    if(Math.abs(dy)<1)continue;
-    b.style.transition='none';b.style.transform=`translateY(${dy}px)`;b.getBoundingClientRect();
-    b.style.transition='transform .24s cubic-bezier(.2,.8,.2,1)';b.style.transform='';
-    setTimeout(()=>{b.style.transition=''},300);
-  }
+  clearTimeout(flipTimer);
+  const boxes=[...document.querySelectorAll('#cards .carousel')];
+  boxes.forEach(b=>{b.style.transition='none';b.style.transform=''});
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches){settle();return}
+  const moves=boxes.map(b=>{const old=before.get(b.dataset.provider);return [b,old==null?0:old-b.getBoundingClientRect().top]}).filter(([,dy])=>Math.abs(dy)>=1);
+  moves.forEach(([b,dy])=>{b.style.transform=`translateY(${dy}px)`});
+  document.body.getBoundingClientRect();  // start from the old places
+  moves.forEach(([b])=>{b.style.transition='transform .24s cubic-bezier(.2,.8,.2,1)';b.style.transform=''});
+  flipTimer=setTimeout(settle,300);
 }
 let drag=null;
 // While dragging, the cards the dragged one passes slide up or down by its height to show where it will land.
@@ -515,12 +519,14 @@ function makeRoom(target){
   const slots=drag.slots,a=slots.findIndex(s=>s.box===drag.box),room=drag.room;
   slots.forEach((s,i)=>{if(i===a)return;const shift=i>a&&i<=target?-room:i<a&&i>=target?room:0;s.box.style.transform=shift?`translateY(${shift}px)`:''});
 }
-function clearRoom(){document.querySelectorAll('#cards .carousel').forEach(b=>{if(!b.classList.contains('dragging'))b.style.transform=''})}
+
 $('cards').addEventListener('pointerdown',event=>{
   const head=event.target.closest('.card-head'),box=head?.closest('.carousel');
   if(!box||event.button!==0||event.target.closest('button')||serviceOrder().length<2)return;
+  clearTimeout(flipTimer);settle();  // a card still gliding from the last drop starts from its resting place
   const area=$('cards').getBoundingClientRect(),start=box.getBoundingClientRect();
-  drag={box,id:event.pointerId,y:event.clientY,scroll:$('cards').scrollTop,moved:false,target:null,min:area.top-start.top,max:area.bottom-start.bottom};
+  // -3 px: the lifted card is scaled up a little and must not reach past the list (that would add a scrollbar)
+  drag={box,id:event.pointerId,y:event.clientY,scroll:$('cards').scrollTop,moved:false,target:null,min:area.top-start.top+3,max:area.bottom-start.bottom-3};
 });
 addEventListener('pointermove',event=>{
   if(!drag||event.pointerId!==drag.id)return;
@@ -537,13 +543,14 @@ addEventListener('pointermove',event=>{
   event.preventDefault();
   const shift=Math.min(drag.max,Math.max(drag.min,dy));  // stays inside the list, so no scrollbar appears
   drag.box.style.transform=`translateY(${shift}px)`;
-  // The slot it would land in: the cards (where they started) whose middle is above the dragged card's middle.
-  const center=drag.mid+shift,a=drag.slots.findIndex(s=>s.box===drag.box);
-  let target=drag.slots.filter((s,i)=>i!==a&&s.mid<center).length;
-  makeRoom(target);
+  // The slot it would land in: the cards (where they started) whose middle is above the pointer. At either
+  // end of the list it is the first or last slot, even when the dragged card is taller than the edge card.
+  const pointer=event.clientY+($('cards').scrollTop-drag.scroll),a=drag.slots.findIndex(s=>s.box===drag.box);
   const others=drag.slots.filter((s,i)=>i!==a);
+  let target=others.filter(s=>s.mid<pointer).length;
+  if(dy<=drag.min)target=0;else if(dy>=drag.max)target=others.length;
+  makeRoom(target);
   drag.target=target<others.length?others[target].box.dataset.provider:null;
-  drag.index=target;
 });
 function cancelDrag(){if(drag)endDrag({pointerId:drag.id,type:'pointercancel'})}
 function endDrag(event){
@@ -554,7 +561,7 @@ function endDrag(event){
   order.splice(at<0?order.length:at,0,p);
   // Settle: every card glides from where it is drawn now (dragged, or moved aside) to its place in the new order.
   flip(()=>{
-    $('cards').classList.remove('sorting');d.box.classList.remove('dragging');
+    $('cards').classList.remove('sorting');d.box.classList.remove('dragging');d.box.classList.add('settling');  // stays on top while it lands
     document.querySelectorAll('#cards .carousel').forEach(b=>{b.style.transform=''});
     if(d.renderLater)render(...d.renderLater);
     if(!cancel)applyOrder(order);
