@@ -50,7 +50,6 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 .card-head{display:flex;align-items:center;gap:8px;min-width:0}
 .glyph{width:26px;height:26px;border-radius:7px;overflow:hidden;flex:none}.glyph img{width:100%;height:100%;object-fit:cover;display:block}
 .brand{font-size:14px;font-weight:720;margin:0;flex:none}
-.account-pill{min-width:0;flex:0 1 auto;max-width:150px;background:var(--control);border:1px solid var(--line);border-radius:8px;padding:3px 7px;font-size:10px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(12px)}
 .nav-group{display:flex;flex:none;align-items:center;gap:3px}
 .nav{width:24px;height:24px;padding:0;border-radius:7px;display:grid;place-items:center}.nav svg{width:14px;height:14px;stroke-width:2.2}
 .count{min-width:24px;text-align:center;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
@@ -180,14 +179,20 @@ function button(cls,action,p,id,iconName,text,label,title,extra={}){
   const isBusy=busy.has(busyKey(action==='hide'?'remove':action,p,id)),off=isBusy||extra.disabled;
   return `<button class="${cls}" data-action="${action}" data-provider="${esc(p)}" data-account="${esc(id)}" data-key="${esc(p)}:${action}" aria-label="${esc(label)}" title="${esc(title)}"${extra.pressed==null?'':` aria-pressed="${extra.pressed}"`}${off?' aria-disabled="true"':''}${isBusy?' aria-busy="true"':''}>${isBusy?SPINNER:icon(iconName)}${text?`<span>${esc(text)}</span>`:''}</button>`;
 }
+// Accounts are told apart by email; the profile folder (default, account-2) is only a tooltip. Without an
+// email yet, default is "Account 1" and account-N is "Account N".
+function slotName(id){const n=/^account-(\d+)$/.exec(id);return id==='default'?'Account 1':n?`Account ${n[1]}`:id}
+function folderOf(p,id){const base=p==='claude'?'~/.claude':'~/.codex';return id==='default'?base:`${base}-${id}`}
+function accountName(p,a){return a?.email||lastGood[`${p}:${a?.id}`]?.email||slotName(a?.id||'')}
+function nameFor(p,id){return accountName(p,(lastData?.providers?.[p]?.accounts||[]).find(a=>a.id===id)||{id})}
 function card(g,a,index){
-  const p=g.source,id=a.id,status=statusOf(a),isDefault=id===g.active,count=g.accounts.length,label=`${names[p]} · ${id}`;
+  const p=g.source,id=a.id,status=statusOf(a),isDefault=id===g.active,count=g.accounts.length;
   const cached=status==='unknown'?lastGood[`${p}:${id}`]:null;
-  const email=a.email||cached?.email,plan=a.plan||cached?.plan;
+  const email=a.email||cached?.email,plan=a.plan||cached?.plan,name=email||slotName(id),label=`${names[p]} · ${name}`;
   const nav=count>1?`<span class="nav-group"><button class="nav" data-action="prev" data-provider="${esc(p)}" data-key="${esc(p)}:prev" aria-label="Previous ${names[p]} account" title="Previous account">${icon('prev')}</button><span class="count"><span aria-hidden="true">${index+1}/${count}</span><span class="sr-only">Account ${index+1} of ${count}</span></span><button class="nav" data-action="next" data-provider="${esc(p)}" data-key="${esc(p)}:next" aria-label="Next ${names[p]} account" title="Next account">${icon('next')}</button></span>`:'';
-  const head=`<div class="card-head"><div class="glyph"><img src="${esc(iconSrc(p))}" alt=""></div><h2 class="brand" id="${esc(p)}-name">${names[p]}</h2><span class="spacer"></span><span class="account-pill" id="${esc(p)}-account" title="${esc(id)}">${esc(id)}</span>${nav}</div>`;
+  const head=`<div class="card-head"><div class="glyph"><img src="${esc(iconSrc(p))}" alt=""></div><h2 class="brand" id="${esc(p)}-name">${names[p]}</h2><span class="spacer"></span>${nav}</div>`;
   const badge=isDefault?'<span class="badge" title="New terminals use this account">Active</span>':'';
-  const identity=email||plan||badge?`<div class="identity">${email?`<span class="email" title="${esc(email)}">${esc(email)}</span>`:''}${plan?`<span class="plan">${esc(plan)}</span>`:''}${badge}</div>`:'';
+  const identity=`<div class="identity"><span class="email" id="${esc(p)}-account" title="${esc(`${name} · saved in ${folderOf(p,id)}`)}">${esc(name)}</span>${plan?`<span class="plan">${esc(plan)}</span>`:''}${badge}</div>`;
   const hide=button('act hide','hide',p,id,'hide','','Hide',`Hide ${label}`);
   const signIn=a.connecting?'Reopen sign-in':'Sign in';
   let body;
@@ -298,7 +303,7 @@ function rotate(p,step){
   const g=lastData&&groups(lastData).find(x=>x.source===p);if(!g||g.accounts.length<2)return;
   const i=Math.max(0,g.accounts.findIndex(a=>a.id===carouselPos[p])),j=(i+step+g.accounts.length)%g.accounts.length;
   carouselPos[p]=g.accounts[j].id;carouselIdx[p]=j;render(p,step);
-  announce(`${names[p]} account ${j+1} of ${g.accounts.length}: ${g.accounts[j].id}`);
+  announce(`${names[p]} account ${j+1} of ${g.accounts.length}: ${accountName(p,g.accounts[j])}`);
 }
 function remember(data){for(const [p,info] of Object.entries(data.providers||{}))for(const a of info?.accounts||[])if(statusOf(a)!=='unknown'&&a.windows&&Object.keys(a.windows).length)lastGood[`${p}:${a.id}`]={windows:a.windows,email:a.email,plan:a.plan}}
 
@@ -317,7 +322,7 @@ window.receiveSnapshot=function(encoded){
   // An action error goes on a later Refresh, or on a snapshot 15 s after it appeared (dismiss and the next action clear it too).
   errors.setup=null;errors.refresh=null;if(errors.action&&(errors.action.action==='snapshot'||Date.now()-errors.action.at>=15000))errors.action=null;
   render(moved,1);renderVersion();
-  if(moved)announce(`Added ${names[moved]} · ${data.added}`);
+  if(moved)announce(`Added ${names[moved]} · ${nameFor(moved,data.added)}`);
 };
 window.receiveError=function(encoded){
   let e;try{e=decode(encoded)}catch(error){e={}}
@@ -414,7 +419,7 @@ document.addEventListener('click',event=>{
     case 'quit':send('quit');break;
     case 'prev':case 'next':rotate(provider,action==='prev'?-1:1);break;
     case 'select':case 'login':startAction(action,provider,account);break;
-    case 'hide':pendingHide={provider,account};$('hide-title').textContent=`Hide ${names[provider]} · ${account}?`;openModal('hide-overlay');break;
+    case 'hide':pendingHide={provider,account};$('hide-title').textContent=`Hide ${names[provider]} · ${nameFor(provider,account)}?`;openModal('hide-overlay');break;
     case 'confirm-hide':{const h=pendingHide;pendingHide=null;closeModal();if(h)startAction('remove',h.provider,h.account);break}
     case 'close-dialog':pendingHide=null;closeModal();break;
     case 'update':startUpdate();break;
