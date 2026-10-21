@@ -1,7 +1,7 @@
 # Usagi
 
-A macOS menu bar app that shows Claude Code and Codex usage limits (5-hour, weekly and more) and when they reset, for each of your accounts.
-Add several accounts as cards and pick which one new terminals use.
+A macOS menu bar app for people with more than one Claude Code or Codex account: it shows each account's usage limits (5-hour, weekly and more) and when they reset, and switches which account new terminals (and, if you like, apps) use.
+It reads only what the official CLIs report, never sign-in tokens or browser cookies.
 The name is Japanese for rabbit (うさぎ), and sounds a bit like "usage".
 
 ## Install
@@ -13,7 +13,7 @@ open -a Usagi
 
 Needs macOS 14 or later and the Claude Code or Codex CLI ([requirements](#requirements)). Usagi comes from its own Homebrew tap, so `brew search usagi` won't list it until the tap is added; the command above adds it for you.
 
-<img src="docs/screenshot.png" width="380" alt="Usagi menu with a Claude card and a Codex card showing 5-hour, weekly and model limits, when each reading was updated and when each limit resets">
+<img src="docs/demo.gif" width="380" alt="Usagi menu: Claude and Codex cards with 5-hour, weekly and model limits, a free-reset and a credit line, flipping to a second Codex account, then dragging the Codex card above Claude while the cards slide into place">
 
 - A rabbit icon or your usage percentages appear in the menu bar: one per service (Claude, Codex), for the account marked **Active** (or the service's first card when that account is hidden). Click it to open the account cards; right-click it for **Refresh Now**, **Check for Updates**, **Menu Bar Shows** (how many services before a "+N", from 1 up to the services you have; the largest also covers services added later), **Also Use in Apps** and **Quit Usagi**.
 - To start Usagi when you log in, add it under **System Settings > General > Login Items**.
