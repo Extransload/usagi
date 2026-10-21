@@ -4,8 +4,6 @@ A macOS menu bar app that shows Claude Code and Codex usage limits (5-hour, week
 Add several accounts as cards and pick which one new terminals use.
 The name is Japanese for rabbit (うさぎ), and sounds a bit like "usage".
 
-<img src="docs/screenshot.png" width="380" alt="Usagi popover showing Claude and Codex cards with 5-hour and weekly usage and the time until each limit resets">
-
 ## Install
 
 ```sh
@@ -13,16 +11,22 @@ brew install --cask extransload/tap/usagi
 open -a Usagi
 ```
 
+Needs macOS 14 or later and the Claude Code or Codex CLI ([requirements](#requirements)). Usagi comes from its own Homebrew tap, so `brew search usagi` won't list it until the tap is added; the command above adds it for you.
+
+<img src="docs/screenshot.png" width="380" alt="Usagi popover showing Claude and Codex cards with 5-hour and weekly usage and the time until each limit resets">
+
 - A rabbit icon or your usage percentages appear in the menu bar. Click it to open the account cards.
 - To start Usagi when you log in, add it under **System Settings > General > Login Items**.
 - Usagi is not signed or notarized by Apple. So that it opens right away, the Homebrew install removes the macOS quarantine flag. That skips Apple's check, so install it only if you trust this repository.
 
+## Update and uninstall
+
 When you open the menu, Usagi checks GitHub for a newer release (at most every 6 hours) and asks whether to update. With a Homebrew install, **Update** runs `brew update` and `brew upgrade --cask usagi` in the background and reopens Usagi; the output goes to `~/.config/usagi/update.log`, and if the update hasn't finished after 5 minutes the menu says so and offers to retry. Other installs open the release page instead. To be notified by email, use **Watch > Custom > Releases** on the GitHub repository.
 
-Update and uninstall by hand:
+By hand:
 
 ```sh
-brew upgrade --cask usagi
+brew upgrade --cask usagi            # update
 brew uninstall --cask usagi          # remove the app
 brew uninstall --zap --cask usagi    # also remove the card list and sign-in state (~/.config/usagi)
 ```
