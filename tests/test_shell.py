@@ -46,15 +46,27 @@ class AccountHookTests(IsolatedTest):
                 self.assertEqual(self.run_hook(shell, script),
                                  ["%s/.claude-work|unset|work" % self.home, "unset|unset|default"])
 
-    def test_inherited_export_is_undone_but_a_custom_one_is_kept(self):
+    def test_inherited_export_is_undone_only_for_a_profile_usagi_or_agent_kit_made(self):
         self.select("default", "default")
+        for folder, marker in ((".claude-work", ".usagi-profile"), (".codex-team", ".agentkit-profile"),
+                               (".claude-mine", None)):
+            (self.home / folder).mkdir()
+            if marker:
+                (self.home / folder / marker).write_text("")
         for shell in SHELLS:
             with self.subTest(shell=shell[0]):
                 # A tmux pane or IDE terminal started while "work" was selected, before tracking was exported.
                 self.assertEqual(self.run_hook(shell, REPORT, CLAUDE_CONFIG_DIR=str(self.home / ".claude-work"),
-                                               CODEX_HOME="/custom/codex"), ["unset|/custom/codex|default"])
+                                               CODEX_HOME=str(self.home / ".codex-team")), ["unset|unset|default"])
+                # The user's own exports: a folder without a marker, or not shaped like a profile.
+                self.assertEqual(self.run_hook(shell, REPORT, CLAUDE_CONFIG_DIR=str(self.home / ".claude-mine"),
+                                               CODEX_HOME="/custom/codex"),
+                                 ["%s/.claude-mine|/custom/codex|default" % self.home])
                 self.assertEqual(self.run_hook(shell, REPORT, CLAUDE_CONFIG_DIR=str(self.home / ".claude-x/y")),
                                  ["%s/.claude-x/y|unset|default" % self.home])
+                # With the tracking variable inherited, the value is the hook's own: undone without a marker.
+                self.assertEqual(self.run_hook(shell, REPORT, CLAUDE_CONFIG_DIR=str(self.home / ".claude-mine"),
+                                               _USAGI_CLAUDE_ACCOUNT="mine"), ["unset|unset|default"])
 
     def test_child_shells_know_what_was_set(self):
         (self.home / ".codex-work").mkdir()
