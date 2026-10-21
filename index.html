@@ -1,111 +1,413 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src file: data:; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-:root { color-scheme:light;
-  --ink:#202124;--muted:#62656b;--dim:#777b82;--line:rgba(70,74,82,.16);
-  --card:rgba(255,255,255,.48);--control:rgba(255,255,255,.38);--control-strong:rgba(255,255,255,.72);
-  --shadow:rgba(23,27,37,.08);--on-blue:#fff;--blue:#3278de;--peach:#d97853;--amber:#b98123;--red:#c94f62;
+:root{color-scheme:light;
+  --ink:#202124;--muted:#5d6066;--line:rgba(70,74,82,.16);
+  --card:rgba(255,255,255,.48);--control:rgba(255,255,255,.38);--control-hover:rgba(255,255,255,.7);--control-active:rgba(70,74,82,.12);--control-strong:rgba(255,255,255,.72);
+  --shadow:rgba(23,27,37,.08);--focus:#2563c9;--dialog:rgba(248,248,250,.97);
+  --blue:#3278de;--blue-text:#1f5fbf;--blue-button:#2563c9;--blue-button-hover:#2d6fd8;--blue-button-active:#1f56b0;--on-blue:#fff;
+  --peach:#d97853;--peach-text:#a84a29;--amber:#b98123;--amber-text:#8a5a00;--red:#c94f62;--red-text:#b3263e;
+  --green-text:#1a6b40;--green-tint:rgba(31,122,74,.11);
 }
 @media(prefers-color-scheme:dark){:root{color-scheme:dark;
-  --ink:#f5f5f7;--muted:#c1c3ca;--dim:#a4a6af;--line:rgba(255,255,255,.19);
-  --card:rgba(255,255,255,.105);--control:rgba(255,255,255,.09);--control-strong:rgba(255,255,255,.17);
-  --shadow:rgba(0,0,0,.14);--on-blue:#10213d;--blue:#82b8ff;--peach:#f5a47e;--amber:#f4cc78;--red:#ff8fa4;
+  --ink:#f5f5f7;--muted:#c1c3ca;--line:rgba(255,255,255,.19);
+  --card:rgba(255,255,255,.105);--control:rgba(255,255,255,.09);--control-hover:rgba(255,255,255,.17);--control-active:rgba(255,255,255,.05);--control-strong:rgba(255,255,255,.17);
+  --shadow:rgba(0,0,0,.14);--focus:#82b8ff;--dialog:rgba(48,48,52,.97);
+  --blue:#82b8ff;--blue-text:#9cc6ff;--blue-button:#82b8ff;--blue-button-hover:#9bc7ff;--blue-button-active:#6ea9f5;--on-blue:#10213d;
+  --peach:#f5a47e;--peach-text:#f7ad8a;--amber:#f4cc78;--amber-text:#f4cc78;--red:#ff8fa4;--red-text:#ffa3b4;
+  --green-text:#8ee3b5;--green-tint:rgba(95,211,152,.14);
 }}
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden}
-body{background:transparent;color:var(--ink);font:12px/1.3 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif}
-button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}
+body{background:transparent;color:var(--ink);font:12px/1.3 -apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;cursor:default}
+button,input{font:inherit}
+button{cursor:default;background:var(--bg,var(--control));border:1px solid var(--bd,var(--line));color:var(--fg,var(--ink));transition:background-color .12s ease}
+button:hover:not(:disabled,[aria-disabled=true]){background:var(--bg-hover,var(--control-hover))}
+button:active:not(:disabled,[aria-disabled=true]){background:var(--bg-active,var(--control-active))}
+button:disabled,button[aria-disabled=true]{opacity:.5}button[aria-busy=true]{opacity:1}
+button:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none;display:block}
+code{font:10px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--control);border:1px solid var(--line);border-radius:4px;padding:0 3px}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.spacer{flex:1}
+.primary{--bg:var(--blue-button);--bd:var(--blue-button);--fg:var(--on-blue);--bg-hover:var(--blue-button-hover);--bg-active:var(--blue-button-active);font-weight:650}
+.spinner{display:inline-block;flex:none;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--spin,var(--blue));border-radius:50%;animation:spin .8s linear infinite}
+.claude .spinner{--spin:var(--peach)}
+.spinning svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{50%{opacity:.35}}
 .shell{height:100%;display:flex;flex-direction:column;padding:13px 13px 9px}
 .mast{display:flex;flex:none;align-items:center;gap:10px;margin-bottom:9px}
-#cards{flex:0 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0 -13px;padding:0 13px 2px}
-.state{flex:none;border-radius:5px;padding:1px 5px;font-size:9px;font-weight:650;background:var(--control);color:var(--muted)}.state.on{color:#46ad77;background:rgba(70,173,119,.15)}
-.nav-group{display:flex;flex:none;align-items:center;gap:3px}.nav-group .count{min-width:22px;text-align:center;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
-.nav{width:20px;height:22px;padding:0;border:1px solid var(--line);border-radius:7px;background:var(--control);color:var(--ink);font-size:13px;line-height:1}
-.slide.from-right{animation:slide-right .18s ease}.slide.from-left{animation:slide-left .18s ease}@keyframes slide-right{from{opacity:.2;transform:translateX(16px)}}@keyframes slide-left{from{opacity:.2;transform:translateX(-16px)}}@media(prefers-reduced-motion:reduce){.slide{animation:none!important}}
-.connection-state .login-error{flex:1;min-width:0;color:var(--red);font-size:10px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
-.spacer{flex:1}.icon-button{border:1px solid var(--line);background:var(--control);color:var(--ink);width:28px;height:28px;border-radius:10px;font-size:16px;line-height:1;backdrop-filter:blur(16px)}
+.icon-button{width:28px;height:28px;border-radius:10px;padding:0;display:grid;place-items:center;flex:none;backdrop-filter:blur(16px)}
+.icon-button svg{width:16px;height:16px}
+#cards{flex:0 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0 -13px;padding:0 13px 2px}
+#update,#error{flex:none}
 .card{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:11px 12px 9px;margin-bottom:7px;box-shadow:0 6px 18px var(--shadow);backdrop-filter:blur(20px) saturate(1.25)}
-.card.connecting{min-height:88px}.connection-state{display:flex;align-items:center;gap:7px;margin:12px 0 2px;color:var(--muted);font-size:11px}.connection-state .spinner{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--peach);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-.card-head{display:flex;align-items:center;gap:8px}.glyph{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;overflow:hidden;flex:none}.glyph img{width:100%;height:100%;object-fit:cover}
-.brand{font-size:14px;font-weight:720}.account-picker{min-width:0;background:var(--control);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:3px 7px;max-width:140px;font-size:10px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(12px)}
-.identity{display:flex;gap:7px;align-items:center;margin:5px 0 7px;padding-left:1px;color:var(--muted);font-size:10px;min-height:13px}
-.identity .email{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.plan{border-radius:5px;background:var(--control);padding:1px 5px;color:var(--ink);font-size:9px}
-.meter{margin:0 0 8px}.meter-title{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px}.meter-title b{font-size:10px;font-weight:600}.pct{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
-.bar{height:6px;border-radius:10px;background:var(--line);overflow:hidden}.fill{height:100%;border-radius:10px;transition:width .35s ease}.meter-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:9px;margin-top:3px;font-variant-numeric:tabular-nums}
-.empty{color:var(--dim);font-size:10px}.status-dot{width:6px;height:6px;border-radius:50%;background:var(--dim)}.status-dot.online{background:#46ad77}.account-strip{border-top:1px solid var(--line);padding-top:6px;margin-top:3px;display:flex;align-items:center;justify-content:flex-end}
-.account-actions{display:flex;gap:5px;align-items:center}.action-icon{width:28px;height:26px;display:grid;place-items:center;border:1px solid var(--line);border-radius:8px;background:var(--control);color:var(--muted);padding:0}.action-icon svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.action-icon.active{color:#46ad77}.action-icon.signin{color:var(--blue)}.claude .action-icon.signin{color:var(--peach)}.action-icon.danger{color:var(--red)}
-.footer{display:flex;flex:none;gap:8px;align-items:center;padding:3px 3px 0;color:var(--muted);font-size:10px}.footer .icon-button{border:1px solid var(--line);background:var(--control);color:var(--ink);padding:0}.footer .spacer{flex:1}
-.update{flex:none;display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:9px 10px;border:1px solid var(--blue);border-radius:12px;background:var(--card);font-size:11px;backdrop-filter:blur(20px)}.update[hidden]{display:none}.update .text{flex:1;min-width:0;display:grid;gap:2px}.update .text span{color:var(--muted);font-size:10px}.update button{flex:none;border-radius:8px;padding:5px 9px;border:1px solid var(--line);background:var(--control);color:var(--ink);font-size:11px}.update .now{background:var(--blue);border-color:var(--blue);color:var(--on-blue);font-weight:650}.update .spinner{flex:none;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
-.error{background:var(--control-strong);color:var(--red);border-radius:8px;padding:6px 8px;margin:6px 0;font-size:10px}
+.card.loading{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;padding:14px 12px}
+.slide.from-right{animation:slide-right .18s ease}.slide.from-left{animation:slide-left .18s ease}
+@keyframes slide-right{from{opacity:.2;transform:translateX(16px)}}@keyframes slide-left{from{opacity:.2;transform:translateX(-16px)}}
+.card-head{display:flex;align-items:center;gap:8px;min-width:0}
+.glyph{width:26px;height:26px;border-radius:7px;overflow:hidden;flex:none}.glyph img{width:100%;height:100%;object-fit:cover;display:block}
+.brand{font-size:14px;font-weight:720;margin:0;flex:none}
+.account-pill{min-width:0;flex:0 1 auto;max-width:150px;background:var(--control);border:1px solid var(--line);border-radius:8px;padding:3px 7px;font-size:10px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backdrop-filter:blur(12px)}
+.nav-group{display:flex;flex:none;align-items:center;gap:3px}
+.nav{width:24px;height:24px;padding:0;border-radius:7px;display:grid;place-items:center}.nav svg{width:14px;height:14px;stroke-width:2.2}
+.count{min-width:24px;text-align:center;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
+.identity{display:flex;gap:7px;align-items:center;margin:6px 0 7px;padding-left:1px;color:var(--muted);font-size:10px;min-height:16px}
+.email{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plan{flex:none;border-radius:5px;background:var(--control);padding:1px 5px;color:var(--ink);font-size:10px}
+.badge{flex:none;margin-left:auto;border-radius:5px;padding:1px 6px;font-size:10px;font-weight:650;color:var(--green-text);background:var(--green-tint)}
+.meter{margin:0 0 8px}.meter-title{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:4px}.meter-title b{font-size:10px;font-weight:600}
+.pct{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--tone-text);white-space:nowrap}
+.bar{height:6px;border-radius:10px;background:var(--line);overflow:hidden}.fill{height:100%;border-radius:10px;background:var(--tone);transition:width .35s ease}
+.meta{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:10px;margin-top:3px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.meta .stale{opacity:.85;font-style:italic}
+.t-claude{--tone:var(--peach);--tone-text:var(--peach-text)}.t-codex{--tone:var(--blue);--tone-text:var(--blue-text)}
+.t-amber{--tone:var(--amber);--tone-text:var(--amber-text)}.t-red{--tone:var(--red);--tone-text:var(--red-text)}.t-muted{--tone:var(--line);--tone-text:var(--muted)}
+.no-data{margin:2px 0 8px;color:var(--muted);font-size:11px}
+.note{display:flex;align-items:center;gap:6px;margin:0 0 7px;color:var(--muted);font-size:10px}.note svg{width:12px;height:12px}.note.warn{color:var(--red-text)}
+.note span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status-row{display:flex;align-items:center;gap:7px;margin:10px 0 2px;min-height:28px;color:var(--muted);font-size:11px}
+.status-row .msg{flex:1;min-width:0;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.msg.warn{color:var(--red-text)}
+.hint{margin:4px 0 2px;color:var(--muted);font-size:10px;line-height:1.4}
+.strip{border-top:1px solid var(--line);padding-top:6px;margin-top:3px;display:flex;align-items:center;gap:5px;justify-content:flex-end}
+.act{width:28px;height:26px;display:grid;place-items:center;border-radius:8px;padding:0;--fg:var(--muted)}
+.act.login{--fg:var(--blue-text)}.claude .act.login{--fg:var(--peach-text)}
+.act.select[aria-pressed=true]{--fg:var(--green-text);--bg:var(--green-tint);--bd:transparent;opacity:1}
+.text-button{display:inline-flex;align-items:center;gap:5px;flex:none;height:26px;padding:0 9px;border-radius:8px;font-size:11px;font-weight:650}
+.text-button svg{width:14px;height:14px}.text-button.login svg{color:var(--blue-text)}.claude .text-button.login svg{color:var(--peach-text)}
+.intro h2,.problem h2{font-size:13px;margin:1px 0 4px}.intro p,.problem p{margin:0 0 10px;color:var(--muted);font-size:11px;line-height:1.45}
+.problem h2{display:flex;align-items:center;gap:6px;color:var(--red-text)}.problem.setup h2{color:var(--amber-text)}.problem p{color:var(--ink)}
+.alert{display:flex;align-items:center;gap:7px;margin:1px 0 8px;padding:6px 6px 6px 8px;border:1px solid var(--line);border-radius:10px;background:var(--control-strong);color:var(--red-text);font-size:11px}
+.alert>svg{width:13px;height:13px}.alert .text{flex:1;min-width:0;line-height:1.35}.alert .text span{color:var(--ink)}
+.alert.refresh{background:transparent;border-color:transparent;color:var(--muted);font-size:10px;padding:0 0 0 4px;margin-top:0}.alert.refresh .text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.alert.refresh .text span{color:inherit}
+.alert.setup{background:var(--card);border-color:var(--amber);color:var(--amber-text)}.alert.setup .text b{display:block}
+.mini{width:22px;height:22px;border-radius:7px;padding:0;display:grid;place-items:center;flex:none;--bg:transparent;--bd:transparent;--fg:var(--muted)}.mini svg{width:12px;height:12px;stroke-width:2.2}
+.alert .text-button{height:22px;padding:0 7px;font-size:10px}
+.footer{display:flex;flex:none;gap:8px;align-items:center;padding:3px 3px 0;color:var(--muted);font-size:10px}
+.update{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:9px 10px;border:1px solid var(--blue);border-radius:12px;background:var(--card);font-size:11px;backdrop-filter:blur(20px)}
+.update .text{flex:1;min-width:0;display:grid;gap:2px}.update .text span{color:var(--muted);font-size:10px}
+.update button{flex:none;border-radius:8px;padding:5px 9px;font-size:11px}
 .overlay{position:fixed;inset:0;background:rgba(17,17,27,.57);display:none;align-items:center;justify-content:center;padding:22px}.overlay.show{display:flex}
-.dialog{background:var(--control-strong);border:1px solid var(--line);border-radius:15px;width:100%;padding:18px;box-shadow:0 20px 50px rgba(17,17,27,.25);backdrop-filter:blur(30px)}
-.dialog h2{font-size:16px;margin:0 0 5px}.dialog p{font-size:11px;color:var(--muted);margin:0 0 14px}.dialog input{width:100%;border:1px solid var(--line);background:var(--control);color:var(--ink);border-radius:8px;padding:9px;outline:none}
-.dialog-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.dialog-head h2{margin:0}.provider-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.provider-option{display:flex;align-items:center;flex-direction:column;gap:9px;justify-content:center;min-height:112px;border:1px solid var(--line);border-radius:13px;background:var(--control);color:var(--ink);font-size:12px;font-weight:700;cursor:pointer}.provider-option:hover,.provider-option:focus-visible{background:var(--card);outline:2px solid var(--blue);outline-offset:1px}.provider-option img{width:38px;height:38px;border-radius:9px}
-.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}.dialog-actions button{border-radius:8px;padding:7px 11px;border:1px solid var(--line);background:var(--control);color:var(--ink)}
-.dialog-actions .primary{background:var(--blue);border-color:var(--blue);color:white}.dialog-actions .danger{background:var(--red);border-color:var(--red);color:white}
+.dialog{background:var(--dialog);border:1px solid var(--line);border-radius:15px;width:100%;padding:18px;box-shadow:0 20px 50px rgba(17,17,27,.25);backdrop-filter:blur(30px)}
+.dialog h2{font-size:15px;margin:0 0 5px;overflow-wrap:anywhere}.dialog p{font-size:11px;color:var(--muted);margin:0 0 14px}
+.dialog-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.dialog-head h2{margin:0}
+.provider-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.provider-option{display:flex;align-items:center;flex-direction:column;gap:9px;justify-content:center;min-height:112px;border-radius:13px;font-size:12px;font-weight:700}.provider-option img{width:38px;height:38px;border-radius:9px}
+.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}.dialog-actions button{border-radius:8px;padding:7px 12px}
+@media(prefers-reduced-motion:reduce){.slide{animation:none!important}.fill,button{transition:none}.spinner,.spinning svg{animation:pulse 1.6s ease-in-out infinite}}
 </style></head><body>
 <div class="shell">
-  <div class="mast"><h1>Usage</h1><div class="spacer"></div><button class="icon-button" onclick="send('snapshot')" title="Refresh" aria-label="Refresh">↻</button></div>
-  <div id="update" class="update" hidden></div>
-  <div id="cards"><div class="card">Loading…</div></div><div id="error"></div>
-  <div class="footer"><button class="icon-button" onclick="showAdd()" title="Add account" aria-label="Add account">＋</button><span class="spacer"></span><button class="icon-button" onclick="send('quit')" title="Quit" aria-label="Quit">⏻</button></div>
+  <div class="mast"><h1>Usage</h1><span class="spacer"></span><button class="icon-button" id="refresh" data-action="refresh" data-key="mast:refresh" data-icon="refresh" title="Refresh" aria-label="Refresh"></button></div>
+  <div id="update" aria-live="polite"></div>
+  <div id="cards"></div>
+  <div id="error" role="alert"></div>
+  <div class="footer"><button class="icon-button" id="add" data-action="add" data-key="footer:add" data-icon="plus" title="Add account" aria-label="Add account"></button><span class="spacer"></span><button class="icon-button" data-action="quit" data-key="footer:quit" data-icon="power" title="Quit Usagi" aria-label="Quit Usagi"></button></div>
 </div>
-<div class="overlay" id="overlay" onclick="if(event.target===this)hideAdd()"><div class="dialog"><div class="dialog-head"><h2>Add account</h2><button class="icon-button" onclick="hideAdd()" title="Close" aria-label="Close">×</button></div><div class="provider-grid"><button class="provider-option" onclick="addProvider('claude')" aria-label="Add a Claude account"><img src="assets/claude.png" data-provider-icon="claude" alt=""><span>Claude</span></button><button class="provider-option" onclick="addProvider('codex')" aria-label="Add a Codex account"><img src="assets/codex.png" data-provider-icon="codex" alt=""><span>Codex</span></button></div></div></div>
-<div class="overlay" id="action-overlay"><div class="dialog"><h2 id="action-title"></h2><div class="dialog-actions"><button onclick="hideAccountAction()">Cancel</button><button class="danger" onclick="confirmAccountAction()">Remove</button></div></div></div>
+<div id="announce" class="sr-only" aria-live="polite"></div>
+<div class="overlay" id="add-overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="add-title"><div class="dialog-head"><h2 id="add-title">Add account</h2><button class="icon-button" data-action="close-dialog" data-icon="close" title="Close" aria-label="Close"></button></div><div class="provider-grid"><button class="provider-option" data-action="add-provider" data-provider="claude" aria-label="Add a Claude account"><img src="assets/claude.png" data-provider-icon="claude" alt=""><span>Claude</span></button><button class="provider-option" data-action="add-provider" data-provider="codex" aria-label="Add a Codex account"><img src="assets/codex.png" data-provider-icon="codex" alt=""><span>Codex</span></button></div></div></div>
+<div class="overlay" id="hide-overlay"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="hide-title" aria-describedby="hide-desc"><h2 id="hide-title"></h2><p id="hide-desc">It stays signed in. Add it back with ＋.</p><div class="dialog-actions"><button data-action="close-dialog" data-initial-focus>Cancel</button><button class="primary" data-action="confirm-hide">Hide</button></div></div></div>
 <script>
-let pendingAccountAction=null;
-const sourceNames={claude:'Claude',codex:'Codex'};
-function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function decode(data){return new TextDecoder().decode(Uint8Array.from(atob(data),c=>c.charCodeAt(0)));}
-function send(action,provider,account){const payload={action};if(provider)payload.provider=provider;if(account)payload.account=account;window.webkit?.messageHandlers?.agentUsage?.postMessage(payload);}
-function pct(value){return `${Math.round(value)}%`}
-function countdown(stamp){if(!stamp)return 'No reset time';let s=Math.max(0,Math.floor(stamp-Date.now()/1000));if(!s)return 'Reset';if(s>=86400)return `in ${Math.floor(s/86400)}d ${Math.floor(s%86400/3600)}h`;if(s>=3600)return `in ${Math.floor(s/3600)}h ${Math.floor(s%3600/60)}m`;return `in ${Math.max(1,Math.floor(s/60))}m`}
-function age(stamp){if(!stamp)return 'Not updated yet';let m=Math.max(0,Math.floor((Date.now()/1000-stamp)/60));return m<1?'Updated just now':m<60?`Updated ${m}m ago`:`Updated ${Math.floor(m/60)}h ago`}
-function tone(value,source){return value>=80?'var(--red)':value>=50?'var(--amber)':source==='claude'?'var(--peach)':'var(--blue)'}
-function icon(name){const paths={signin:'<path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M14 8l4 4-4 4M8 12h10"/>',use:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',remove:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"/>'};return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name]}</svg>`}
-function meter(label,reading,source){if(!reading)return '';
- const used=Number(reading.used_percent)||0,stale=reading.captured_at&&Date.now()/1000-reading.captured_at>360*60;
- return `<div class="meter"><div class="meter-title"><b>${escapeHtml(label)}</b><span class="pct" style="color:${tone(used,source)}">${pct(used)}${stale?' · !':''}</span></div><div class="bar"><div class="fill" style="background:${tone(used,source)};width:${Math.min(100,Math.max(0,used))}%"></div></div><div class="meter-meta"><span></span><span>${countdown(reading.resets_at)}</span></div></div>`}
-const providerIcons={};
-function iconSrc(source){return providerIcons[source]||`assets/${source}.png`}
-window.setProviderIcons=function(icons){Object.assign(providerIcons,icons||{});document.querySelectorAll('[data-provider-icon]').forEach(img=>{img.src=iconSrc(img.dataset.providerIcon)});render()};
-function windowLabel(key){return key==='fable'?'Fable':/^\d+d$/.test(key)?`${parseInt(key)}-day`:/^\d+h$/.test(key)?`${parseInt(key)}-hour`:key}
-function card(source,active,isActive,nav=''){if(!active)return '';
- const label=`${sourceNames[source]} · ${active.id}`;
- const state=`<span class="state ${isActive?'on':''}" title="${isActive?'Used by new terminals':'Not used by new terminals'}">${isActive?'Active':'Inactive'}</span>`;
- const sourceTitle=active.source||'No CLI usage';
- if(!active.logged_in){const status=active.connecting?'<span class="spinner"></span>Connecting…':active.login_error?`<span class="login-error" title="${escapeHtml(active.login_error)}">Sign-in failed: ${escapeHtml(active.login_error)}</span>`:'Sign-in required';const action=`<button class="action-icon signin" onclick="send('login','${source}','${escapeHtml(active.id)}')" title="${active.connecting?'Reopen sign-in for':'Sign in to'} ${label}" aria-label="${active.connecting?'Reopen sign-in for':'Sign in to'} ${label}">${icon('signin')}</button>`;return `<section class="card connecting ${source}"><div class="card-head"><div class="glyph"><img src="${iconSrc(source)}" alt=""></div><div class="brand">${sourceNames[source]}</div>${state}<div class="spacer"></div><span class="account-picker">${escapeHtml(active.id)}</span>${nav}</div><div class="connection-state">${status}<div class="spacer"></div>${action}<button class="action-icon danger" onclick="showAccountAction('${source}','${escapeHtml(active.id)}')" title="Remove ${label}" aria-label="Remove ${label}">${icon('remove')}</button></div></section>`}
- const identity=active.logged_in&&active.email?`<div class="identity"><span class="email">${escapeHtml(active.email)}</span>${active.plan?`<span class="plan">${escapeHtml(active.plan)}</span>`:''}</div>`:'';
- let meters='';
- if(active.logged_in){const windows=active.windows||{};const extraKeys=Object.keys(windows).filter(k=>k!=='5h'&&k!=='7d').sort((a,b)=>(windows[b]?.used_percent||0)-(windows[a]?.used_percent||0));meters=meter('5-hour',windows['5h'],source)+meter('Weekly',windows['7d'],source)+extraKeys.slice(0,1).map(k=>meter(windowLabel(k),windows[k],source)).join('')}
- const actions=`<div class="account-actions"><button class="action-icon ${isActive?'active':''}" onclick="send('select','${source}','${escapeHtml(active.id)}')" title="${isActive?'Used by new terminals':'Use for new terminals'}" aria-label="${isActive?'Used by new terminals':'Use for new terminals'}">${icon('use')}</button><button class="action-icon signin" onclick="send('login','${source}','${escapeHtml(active.id)}')" title="Sign in to ${label}" aria-label="Sign in to ${label}">${icon('signin')}</button><button class="action-icon danger" onclick="showAccountAction('${source}','${escapeHtml(active.id)}')" title="Remove ${label}" aria-label="Remove ${label}">${icon('remove')}</button></div>`;
- return `<section class="card ${source}"><div class="card-head"><div class="glyph"><img src="${iconSrc(source)}" alt=""></div><div class="brand">${sourceNames[source]}</div><span class="status-dot ${active.logged_in?'online':''}" title="${active.logged_in?'Signed in':'Not signed in'}"></span>${state}<div class="spacer"></div><span class="account-picker" title="${escapeHtml(sourceTitle)}">${escapeHtml(active.id)}</span>${nav}</div>${identity}${meters}<div class="account-strip">${actions}</div></section>`
+'use strict';
+const names={claude:'Claude',codex:'Codex'};
+const cliHint={claude:['Claude Code','claude'],codex:['The Codex CLI','codex']};
+const failText={snapshot:"Couldn't refresh",login:"Couldn't start sign-in",select:"Couldn't change the terminal account",remove:"Couldn't hide the account",add_auto:"Couldn't add an account",update:"Couldn't update"};
+const ICONS={
+  refresh:'<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  power:'<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>',
+  close:'<path d="M18 6 6 18M6 6l12 12"/>',
+  prev:'<path d="m15 18-6-6 6-6"/>',
+  next:'<path d="m9 18 6-6-6-6"/>',
+  login:'<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="m10 17 5-5-5-5"/><path d="M15 12H3"/>',
+  use:'<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+  hide:'<path d="M10.73 5.08A10.74 10.74 0 0 1 21.94 11.65a1 1 0 0 1 0 .7 10.75 10.75 0 0 1-1.44 2.49"/><path d="M14.08 14.16a3 3 0 0 1-4.24-4.24"/><path d="M17.48 17.5a10.75 10.75 0 0 1-15.42-5.15 1 1 0 0 1 0-.7 10.75 10.75 0 0 1 4.45-5.14"/><path d="m2 2 20 20"/>',
+  alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/>'
+};
+const SPINNER='<span class="spinner" aria-hidden="true"></span>';
+const $=id=>document.getElementById(id);
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const icon=name=>`<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
+function decode(data){return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(data),c=>c.charCodeAt(0))))}
+function send(action,fields){const body={action};for(const [k,v] of Object.entries(fields||{}))if(v!=null&&v!=='')body[k]=String(v);window.webkit?.messageHandlers?.agentUsage?.postMessage(body)}
+
+let lastData=null,modal=null,opener=null,pendingHide=null,pendingAdd=null,sentHeight=0;
+let updateInfo=null,updateHidden=false,updating=false,updateFailed=false,updateError='',sourceInstall=false,updateTimer=null;
+const errors={setup:null,action:null,refresh:null};
+const busy=new Map(),carouselPos={},carouselIdx={},lastGood={},providerIcons={};
+
+// Busy state: one key per provider:account:action so repeat clicks are ignored until actionDone.
+const busyKey=(action,provider,account)=>`${provider||''}:${account||''}:${action}`;
+function setBusy(key,on){clearTimeout(busy.get(key));busy.delete(key);if(on)busy.set(key,setTimeout(()=>{busy.delete(key);render()},90000))}
+function startAction(action,provider,account){const key=busyKey(action,provider,account);if(busy.has(key))return;errors.action=null;setBusy(key,true);send(action,{provider,account});render()}
+
+// Times are filled in place (data-rel) so the minute tick never rebuilds the cards.
+const nowSec=()=>Date.now()/1000;
+function duration(s){if(s>=86400)return `${Math.floor(s/86400)}d ${Math.floor(s%86400/3600)}h`;if(s>=3600)return `${Math.floor(s/3600)}h ${Math.floor(s%3600/60)}m`;return `${Math.max(1,Math.floor(s/60))}m`}
+function relText(kind,at){if(kind==='age'){const m=Math.floor((nowSec()-at)/60);return m<1?'Updated just now':m<60?`Updated ${m}m ago`:m<2880?`Updated ${Math.floor(m/60)}h ago`:`Updated ${Math.floor(m/1440)}d ago`}const s=at-nowSec();return s<=0?'Resets now':`Resets in ${duration(s)}`}
+function absolute(at){return new Date(at*1000).toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}
+function updateTimes(){document.querySelectorAll('[data-rel]').forEach(node=>{const text=relText(node.dataset.rel,Number(node.dataset.at));if(node.textContent!==text)node.textContent=text})}
+
+function statusOf(a){return a.status||(a.logged_in?'signed_in':'signed_out')}
+function iconSrc(p){return providerIcons[p]||`assets/${p}.png`}
+function windowLabel(key){if(key==='5h')return '5-hour';if(key==='7d')return 'Weekly';const m=/^(\d+)([dh])$/.exec(key);if(m)return `${Number(m[1])}-${m[2]==='d'?'day':'hour'}`;return key.split(/[\s_-]+/).filter(Boolean).map(w=>w[0].toUpperCase()+w.slice(1)).join(' ')+' weekly'}
+function meter(p,key,w,source){
+  const used=Math.max(0,Number(w.used_percent)||0),reset=w.reset===true,full=used>=100&&!reset;
+  const tone=reset?'t-muted':used>=80?'t-red':used>=50?'t-amber':`t-${p}`;
+  let left='',right='';
+  if(reset)right='<span>Reset · updates on next use</span>';
+  else{
+    const at=Number(w.captured_at)||0,age=at?`<span data-rel="age" data-at="${esc(at)}"></span>`:'';
+    const read=at?`Read ${absolute(at)}${source?` from ${source}`:''}.`:'';
+    left=w.stale?`<span class="stale" title="${esc(`This reading may be outdated. ${p==='claude'?'Claude Code updates it the next time you use it. ':''}${read}`)}">${age?age+' · ':''}may be outdated</span>`:age?`<span title="${esc(read)}">${age}</span>`:'';
+    if(Number(w.resets_at))right=`<span data-rel="reset" data-at="${esc(Number(w.resets_at))}" title="${esc('Resets '+absolute(Number(w.resets_at)))}"></span>`;
+  }
+  const value=reset?'0%':full?'Limit reached':`${Math.round(used)}%`;
+  return `<div class="meter ${tone}"><div class="meter-title"><b>${esc(windowLabel(key))}</b><span class="pct"${full?` title="${esc(Math.round(used))}% used"`:''}>${esc(value)}</span></div><div class="bar" aria-hidden="true"><div class="fill" style="width:${reset?0:Math.min(100,used)}%"></div></div><div class="meta">${left||'<span></span>'}${right}</div></div>`;
 }
-let lastData=null,swipe=0,swipeAt=0,swipeLock=0;const carouselPos={};
-function requestSize(){requestAnimationFrame(()=>{const cards=document.getElementById('cards');send('resize',null,String(Math.ceil(document.querySelector('.footer').getBoundingClientRect().bottom+9+cards.scrollHeight-cards.clientHeight)))})}
-function groups(data){const order=[],byProvider={};for(const item of data.cards||[]){const account=(data.providers?.[item.provider]?.accounts||[]).find(a=>a.id===item.id);if(!account)continue;if(!byProvider[item.provider]){byProvider[item.provider]=[];order.push(item.provider)}byProvider[item.provider].push(account)}
- return order.map(source=>({source,active:data.providers[source].active,accounts:byProvider[source].sort((a,b)=>(b.id==='default')-(a.id==='default'))}))}
-function carousel(group,motion){const {source,active,accounts}=group;const index=Math.max(0,accounts.findIndex(a=>a.id===carouselPos[source]));carouselPos[source]=accounts[index].id;
- const nav=accounts.length>1?`<span class="nav-group"><button class="nav" onclick="rotate('${source}',-1)" title="Previous account" aria-label="Previous account">‹</button><span class="count">${index+1}/${accounts.length}</span><button class="nav" onclick="rotate('${source}',1)" title="Next account" aria-label="Next account">›</button></span>`:'';
- return `<div class="carousel" data-provider="${source}"><div class="slide ${motion||''}">${card(source,accounts[index],accounts[index].id===active,nav)}</div></div>`}
-function render(moved,step){if(!lastData)return;document.getElementById('cards').innerHTML=groups(lastData).map(g=>carousel(g,g.source===moved?(step<0?'from-left':'from-right'):'')).join('');requestSize()}
-function rotate(source,step){const group=lastData&&groups(lastData).find(g=>g.source===source);if(!group||group.accounts.length<2)return;const index=Math.max(0,group.accounts.findIndex(a=>a.id===carouselPos[source]));carouselPos[source]=group.accounts[(index+step+group.accounts.length)%group.accounts.length].id;render(source,step)}
-window.receiveSnapshot=function(encoded){try{lastData=JSON.parse(decode(encoded));render();const node=document.getElementById('error');node.className='';node.textContent='';hideAdd()}catch(error){document.getElementById('error').textContent=String(error)}};
-let updateInfo=null,updateHidden=false,updating=false,updateFailed=false,updateTimer=null;
-window.setUpdate=function(info){updateInfo=info;renderUpdate()};
-window.receiveUpdateResult=function(encoded){const result=JSON.parse(decode(encoded));if(!result.updating){updating=false;updateHidden=true;clearTimeout(updateTimer)}renderUpdate()};
-function renderUpdate(){const node=document.getElementById('update');node.hidden=!updateInfo||updateHidden;
- if(!node.hidden)node.innerHTML=updating?`<span class="spinner"></span><div class="text"><b>Updating to ${escapeHtml(updateInfo.version)}…</b><span>Usagi will close and reopen.</span></div>`:updateFailed?`<div class="text"><b>The update didn't finish</b><span>Details are in ~/.config/usagi/update.log</span></div><button onclick="hideUpdate()">Later</button><button class="now" onclick="startUpdate()">Retry</button>`:`<div class="text"><b>Usagi ${escapeHtml(updateInfo.version)} is available</b><span>You have ${escapeHtml(updateInfo.current)}. Update now?</span></div><button onclick="hideUpdate()">Later</button><button class="now" onclick="startUpdate()">Update</button>`;
- requestSize()}
-function hideUpdate(){updateHidden=true;renderUpdate()}
-function startUpdate(){updating=true;updateFailed=false;renderUpdate();send('update');clearTimeout(updateTimer);updateTimer=setTimeout(()=>{if(updating){updating=false;updateFailed=true;renderUpdate()}},300000)}
-window.receiveError=function(encoded){if(updating){updating=false;clearTimeout(updateTimer);renderUpdate()}const node=document.getElementById('error');node.className='error';node.textContent=decode(encoded);requestSize()};
-document.getElementById('cards').addEventListener('wheel',event=>{const box=event.target.closest('.carousel');if(!box||Math.abs(event.deltaX)<=Math.abs(event.deltaY))return;event.preventDefault();if(Date.now()<swipeLock)return;if(Date.now()-swipeAt>200)swipe=0;swipeAt=Date.now();swipe+=event.deltaX;if(Math.abs(swipe)>40){rotate(box.dataset.provider,swipe>0?1:-1);swipe=0;swipeLock=Date.now()+450}},{passive:false});
-function showAccountAction(provider,account){pendingAccountAction={provider,account};document.getElementById('action-title').textContent=`Remove ${sourceNames[provider]} · ${account}?`;document.getElementById('action-overlay').classList.add('show')}
-function hideAccountAction(){pendingAccountAction=null;document.getElementById('action-overlay').classList.remove('show')}
-function confirmAccountAction(){if(!pendingAccountAction)return;const {provider,account}=pendingAccountAction;hideAccountAction();send('remove',provider,account)}
-function showAdd(){document.getElementById('overlay').classList.add('show');document.querySelector('.provider-option').focus()}
-function hideAdd(){document.getElementById('overlay').classList.remove('show')}
-function addProvider(provider){hideAdd();send('add_auto',provider)}
-document.addEventListener('keydown',event=>{if(event.key==='Escape'){hideAdd();hideAccountAction()}});
+function meters(p,windows,source){
+  windows=windows||{};
+  const extra=Object.keys(windows).filter(k=>k!=='5h'&&k!=='7d'&&windows[k]).sort((a,b)=>(Number(windows[b].used_percent)||0)-(Number(windows[a].used_percent)||0)).slice(0,2);
+  const keys=['5h','7d'].filter(k=>windows[k]).concat(extra);
+  if(!keys.length)return `<p class="no-data">${p==='claude'?'No usage data yet · Run Claude Code once to load usage':'No usage data yet'}</p>`;
+  return keys.map(k=>meter(p,k,windows[k],source)).join('');
+}
+function button(cls,action,p,id,iconName,text,label,title,extra={}){
+  const isBusy=busy.has(busyKey(action==='hide'?'remove':action,p,id)),off=isBusy||extra.disabled;
+  return `<button class="${cls}" data-action="${action}" data-provider="${esc(p)}" data-account="${esc(id)}" data-key="${esc(p)}:${action}" aria-label="${esc(label)}" title="${esc(title)}"${extra.pressed==null?'':` aria-pressed="${extra.pressed}"`}${off?' aria-disabled="true"':''}${isBusy?' aria-busy="true"':''}>${isBusy?SPINNER:icon(iconName)}${text?`<span>${esc(text)}</span>`:''}</button>`;
+}
+function card(g,a,index){
+  const p=g.source,id=a.id,status=statusOf(a),isDefault=id===g.active,count=g.accounts.length,label=`${names[p]} · ${id}`;
+  const cached=status==='unknown'?lastGood[`${p}:${id}`]:null;
+  const email=a.email||cached?.email,plan=a.plan||cached?.plan;
+  const nav=count>1?`<span class="nav-group"><button class="nav" data-action="prev" data-provider="${esc(p)}" data-key="${esc(p)}:prev" aria-label="Previous ${names[p]} account" title="Previous account">${icon('prev')}</button><span class="count"><span aria-hidden="true">${index+1}/${count}</span><span class="sr-only">Account ${index+1} of ${count}</span></span><button class="nav" data-action="next" data-provider="${esc(p)}" data-key="${esc(p)}:next" aria-label="Next ${names[p]} account" title="Next account">${icon('next')}</button></span>`:'';
+  const head=`<div class="card-head"><div class="glyph"><img src="${esc(iconSrc(p))}" alt=""></div><h2 class="brand" id="${esc(p)}-name">${names[p]}</h2><span class="spacer"></span><span class="account-pill" id="${esc(p)}-account" title="${esc(id)}">${esc(id)}</span>${nav}</div>`;
+  const badge=isDefault?'<span class="badge" title="New terminals use this account">Terminal default</span>':'';
+  const identity=email||plan||badge?`<div class="identity">${email?`<span class="email" title="${esc(email)}">${esc(email)}</span>`:''}${plan?`<span class="plan">${esc(plan)}</span>`:''}${badge}</div>`:'';
+  const hide=button('act hide','hide',p,id,'hide','','Hide',`Hide ${label}`);
+  const signIn=a.connecting?'Reopen sign-in':'Sign in';
+  let body;
+  if(status==='cli_missing'){
+    body=`<div class="status-row"><span class="msg warn">${cliHint[p][0]} was not found</span>${hide}</div><p class="hint">Install it so the <code>${cliHint[p][1]}</code> command works, then press Refresh.</p>`;
+  }else if(status!=='signed_in'&&status!=='unknown'){
+    const msg=a.connecting?`${SPINNER}<span class="msg">Waiting for sign-in in your browser…</span>`:a.login_error?`<span class="msg warn" title="${esc(a.login_error)}">Sign-in failed: ${esc(a.login_error)}</span>`:'<span class="msg">Sign-in required</span>';
+    body=`<div class="status-row">${msg}${button('text-button login','login',p,id,'login',signIn,`${signIn} to ${label}`,`${signIn} to ${label}`)}${hide}</div>`;
+  }else{
+    const own=a.windows&&Object.keys(a.windows).length?a.windows:null;
+    let notes='';
+    if(status==='unknown')notes+=`<p class="note">${icon('alert')}<span>${own||cached?"Couldn't check sign-in · showing last reading":"Couldn't check sign-in"}</span></p>`;
+    if(a.connecting)notes+=`<p class="note">${SPINNER}<span>Waiting for sign-in in your browser…</span></p>`;
+    else if(a.login_error)notes+=`<p class="note warn" title="${esc(a.login_error)}">${icon('alert')}<span>Sign-in failed: ${esc(a.login_error)}</span></p>`;
+    const select=button('act select','select',p,id,'use','','Use in new terminals',isDefault?'New terminals use this account':`Use ${label} in new terminals`,{pressed:isDefault,disabled:isDefault});
+    const again=a.connecting?'Reopen sign-in':'Sign in again';
+    body=`${meters(p,own||cached?.windows,a.source)}${notes}<div class="strip">${select}${button('act login','login',p,id,'login','',again,`${again} to ${label}`)}${hide}</div>`;
+  }
+  return `<section class="card ${esc(p)}" aria-labelledby="${esc(p)}-name ${esc(p)}-account">${head}${identity}${body}</section>`;
+}
+function groups(data){
+  const order=[],shown=new Set();
+  for(const c of data.cards||[]){if(!names[c.provider])continue;shown.add(`${c.provider}:${c.id}`);if(!order.includes(c.provider))order.push(c.provider)}
+  return order.map(p=>{const info=data.providers?.[p]||{};return {source:p,active:info.active,accounts:(info.accounts||[]).filter(a=>shown.has(`${p}:${a.id}`))}}).filter(g=>g.accounts.length);
+}
+function carousel(g){
+  const p=g.source,list=g.accounts;
+  let i=list.findIndex(a=>a.id===carouselPos[p]);
+  if(i<0)i=Math.min(carouselIdx[p]??0,list.length-1);
+  carouselPos[p]=list[i].id;carouselIdx[p]=i;
+  return `<div class="carousel" data-provider="${esc(p)}" data-count="${list.length}"><div class="slide">${card(g,list[i],i)}</div></div>`;
+}
+function emptyCard(){
+  const prov=lastData.providers||{};
+  if(['claude','codex'].every(p=>prov[p]?.cli===false))return `<section class="card intro" aria-labelledby="intro-title"><h2 id="intro-title">Install Claude Code or the Codex CLI</h2><p>Usagi reads usage limits from the <code>claude</code> command (Claude Code) and the <code>codex</code> command (Codex CLI). Install either one, then check again.</p><button class="text-button primary" data-action="refresh" data-key="intro:refresh"${busy.has(busyKey('snapshot'))?' aria-disabled="true" aria-busy="true"':''}>${busy.has(busyKey('snapshot'))?SPINNER:icon('refresh')}<span>Check again</span></button></section>`;
+  return `<section class="card intro" aria-labelledby="intro-title"><h2 id="intro-title">No accounts yet</h2><p>Add a Claude or Codex account to see its usage limits and when they reset.</p><button class="text-button primary" data-action="add" data-key="intro:add">${icon('plus')}<span>Add account</span></button></section>`;
+}
+function problemCard(e){
+  const setup=e.kind==='setup',retrying=busy.has(busyKey('snapshot'));
+  return `<section class="card problem${setup?' setup':''}" role="alert" aria-labelledby="problem-title"><h2 id="problem-title">${icon('alert')}${setup?'Setup needed':"Couldn't load usage"}</h2><p>${esc(e.message)}</p><button class="text-button" data-action="refresh" data-key="problem:retry"${retrying?' aria-disabled="true" aria-busy="true"':''}>${retrying?SPINNER:icon('refresh')}<span>Try again</span></button></section>`;
+}
+
+// Replace only the blocks whose markup changed, then put focus back on the element with the same data-key.
+function patch(container,blocks){
+  const active=document.activeElement,key=container.contains(active)?active.dataset.key:null;
+  const old=new Map([...container.children].map(n=>[n.dataset.block,n]));
+  let changed=false,index=0;
+  for(const b of blocks){
+    if(!b.html)continue;
+    let node=old.get(b.key);old.delete(b.key);
+    if(!node||node._html!==b.html){
+      const t=document.createElement('template');t.innerHTML=b.html;
+      const fresh=t.content.firstElementChild;fresh.dataset.block=b.key;fresh._html=b.html;
+      if(node)node.replaceWith(fresh);else container.append(fresh);
+      node=fresh;changed=true;
+    }
+    if(container.children[index]!==node){container.insertBefore(node,container.children[index]||null);changed=true}
+    index++;
+  }
+  old.forEach(n=>{n.remove();changed=true});
+  if(changed&&key&&!container.contains(active)){
+    const scope=key.split(':')[0];
+    (container.querySelector(`[data-key="${CSS.escape(key)}"]`)||container.querySelector(`[data-key^="${CSS.escape(scope)}:"]`))?.focus({preventScroll:true});
+  }
+  return changed;
+}
+const LOADING='<div class="card loading" role="status"><span class="spinner" aria-hidden="true"></span>Loading usage…</div>';
+function render(moved,step){
+  const blocks=[];
+  if(!lastData){const e=errors.setup||errors.action||errors.refresh;blocks.push(e?{key:'problem',html:problemCard(e)}:{key:'loading',html:LOADING})}
+  else{const list=groups(lastData);if(!list.length)blocks.push({key:'empty',html:emptyCard()});for(const g of list)blocks.push({key:g.source,html:carousel(g)})}
+  const cards=$('cards');
+  patch(cards,blocks);
+  const slide=moved&&cards.querySelector(`.carousel[data-provider="${CSS.escape(moved)}"] .slide`);
+  if(slide)slide.classList.add(step<0?'from-left':'from-right');
+  renderError();syncChrome();updateTimes();measure();
+  if(slide){const box=slide.getBoundingClientRect(),view=cards.getBoundingClientRect();if(box.top<view.top)cards.scrollTop-=view.top-box.top;else if(box.bottom>view.bottom)cards.scrollTop+=Math.min(box.bottom-view.bottom,box.top-view.top)}
+}
+function renderError(){
+  const e=lastData?errors.setup||errors.action||errors.refresh:null;
+  let html='';
+  if(e){
+    const title=e.kind==='setup'?'Setup needed':e.kind==='refresh'?"Couldn't refresh":failText[e.action]||'Something went wrong';
+    const retrying=busy.has(busyKey('snapshot'));
+    const retry=e.kind==='action'?'':`<button class="text-button" data-action="refresh" data-key="error:retry"${retrying?' aria-disabled="true" aria-busy="true"':''}>${retrying?SPINNER:''}<span>Retry</span></button>`;
+    html=`<div class="alert ${e.kind}">${icon('alert')}<div class="text" title="${esc(e.message)}"><b>${esc(title)}</b>${e.kind==='setup'?'':': '}<span>${esc(e.message)}</span></div>${retry}<button class="mini" data-action="dismiss-error" data-kind="${esc(e.kind)}" data-key="error:dismiss" aria-label="Dismiss" title="Dismiss">${icon('close')}</button></div>`;
+  }
+  patch($('error'),[{key:'error',html}]);
+}
+function syncChrome(){
+  const refresh=$('refresh'),refreshing=busy.has(busyKey('snapshot'));
+  refresh.classList.toggle('spinning',refreshing);refresh.setAttribute('aria-busy',String(refreshing));
+  const add=$('add'),adding=[...busy.keys()].some(k=>k.endsWith(':add_auto'));
+  if(add.getAttribute('aria-busy')!==String(adding)){add.innerHTML=adding?SPINNER:icon('plus');add.setAttribute('aria-busy',String(adding))}
+}
+function measure(force){
+  const cards=$('cards');
+  const height=Math.ceil(document.querySelector('.footer').getBoundingClientRect().bottom+9+Math.max(0,cards.scrollHeight-cards.clientHeight));
+  if(force||height!==sentHeight){sentHeight=height;send('resize',{height})}
+}
+function announce(text){$('announce').textContent=text}
+function rotate(p,step){
+  const g=lastData&&groups(lastData).find(x=>x.source===p);if(!g||g.accounts.length<2)return;
+  const i=Math.max(0,g.accounts.findIndex(a=>a.id===carouselPos[p])),j=(i+step+g.accounts.length)%g.accounts.length;
+  carouselPos[p]=g.accounts[j].id;carouselIdx[p]=j;render(p,step);
+  announce(`${names[p]} account ${j+1} of ${g.accounts.length}: ${g.accounts[j].id}`);
+}
+function remember(data){for(const [p,info] of Object.entries(data.providers||{}))for(const a of info?.accounts||[])if(statusOf(a)!=='unknown'&&a.windows&&Object.keys(a.windows).length)lastGood[`${p}:${a.id}`]={windows:a.windows,email:a.email,plan:a.plan}}
+
+window.receiveSnapshot=function(encoded){
+  let data;
+  try{data=decode(encoded)}catch(error){errors.refresh={kind:'refresh',action:'snapshot',message:'Usagi got usage data it could not read.'};render();return}
+  let moved=null;
+  if(data.added){
+    const before=new Set((lastData?.cards||[]).map(c=>`${c.provider}:${c.id}`));
+    const hits=(data.cards||[]).filter(c=>c.id===data.added&&names[c.provider]);
+    const pick=hits.find(c=>c.provider===pendingAdd)||hits.find(c=>!before.has(`${c.provider}:${c.id}`))||hits[0];
+    if(pick){carouselPos[pick.provider]=pick.id;moved=pick.provider}
+    pendingAdd=null;
+  }
+  lastData=data;remember(data);
+  errors.setup=null;errors.refresh=null;if(errors.action?.action==='snapshot')errors.action=null;
+  render(moved,1);
+  if(moved)announce(`Added ${names[moved]} · ${data.added}`);
+};
+window.receiveError=function(encoded){
+  let e;try{e=decode(encoded)}catch(error){e={}}
+  const kind=['action','refresh','setup'].includes(e?.kind)?e.kind:'action',action=String(e?.action||''),message=String(e?.message||'Something went wrong.');
+  if(kind!=='refresh'&&action)for(const k of [...busy.keys()])if(k.endsWith(':'+action))setBusy(k,false);
+  if(action==='update'&&kind!=='refresh'&&updateInfo){updating=false;updateFailed=true;updateError=message;sourceInstall=false;updateHidden=false;clearTimeout(updateTimer);renderUpdate();return}
+  errors[kind]={kind,action,message};
+  render();
+};
+window.actionDone=function(encoded){
+  let d;try{d=decode(encoded)}catch(error){return}
+  setBusy(busyKey(d.action,d.provider,d.account),false);
+  render();
+};
+window.setProviderIcons=function(icons){
+  for(const [p,src] of Object.entries(icons||{}))if(names[p]&&typeof src==='string'&&src.startsWith('data:image/'))providerIcons[p]=src;
+  document.querySelectorAll('[data-provider-icon]').forEach(img=>{img.src=iconSrc(img.dataset.providerIcon)});
+  render();
+};
+window.setUpdate=function(info){updateInfo=info&&info.version?info:null;renderUpdate()};
+window.receiveUpdateResult=function(encoded){
+  let r;try{r=decode(encoded)}catch(error){r={}}
+  if(!r.updating){updating=false;clearTimeout(updateTimer);if(r.source_install)sourceInstall=true;else updateHidden=true}
+  renderUpdate();
+};
+window.popoverShown=function(){updateTimes();measure(true)};
+function renderUpdate(){
+  let html='';
+  if(updateInfo&&!updateHidden){
+    const v=esc(updateInfo.version),later='<button data-action="update-later" data-key="update:later">Later</button>';
+    if(updating)html=`<div class="update">${SPINNER}<div class="text"><b>Updating to ${v}…</b><span>Usagi will close and reopen.</span></div></div>`;
+    else if(updateFailed)html=`<div class="update"><div class="text"><b>The update didn't finish</b><span title="${esc(updateError)}">${updateError?esc(updateError):'Details are in ~/.config/usagi/update.log'}</span></div>${later}<button class="primary" data-action="update" data-key="update:now">Retry</button></div>`;
+    else if(sourceInstall)html=`<div class="update"><div class="text"><b>Usagi ${v} is available</b><span>This copy was built from source. Pull and run ./install.sh to update.</span></div><button data-action="update-later" data-key="update:later">OK</button></div>`;
+    else html=`<div class="update"><div class="text"><b>Usagi ${v} is available</b><span>You have ${esc(updateInfo.current)}. Update now?</span></div>${later}<button class="primary" data-action="update" data-key="update:now">Update</button></div>`;
+  }
+  patch($('update'),[{key:'update',html}]);
+  measure();
+}
+function startUpdate(){
+  if(updating)return;
+  updating=true;updateFailed=false;updateError='';sourceInstall=false;renderUpdate();send('update');
+  clearTimeout(updateTimer);
+  updateTimer=setTimeout(()=>{if(updating){updating=false;updateFailed=true;renderUpdate()}},300000);
+}
+
+// Dialogs: modal with focus moved in, Tab trapped, focus returned to the opener (by data-key if it was re-rendered).
+function openModal(id){
+  const active=document.activeElement;opener={el:active,key:active?.dataset?.key};
+  modal=$(id);modal.classList.add('show');document.querySelector('.shell').inert=true;
+  (modal.querySelector('[data-initial-focus]')||modal.querySelector('.provider-option')||modal.querySelector('button')).focus();
+}
+function closeModal(){
+  if(!modal)return;
+  modal.classList.remove('show');modal=null;document.querySelector('.shell').inert=false;
+  const o=opener;opener=null;
+  const target=o?.el?.isConnected?o.el:o?.key?document.querySelector(`[data-key="${CSS.escape(o.key)}"]`):null;
+  target?.focus({preventScroll:true});
+}
+document.addEventListener('click',event=>{
+  if(modal&&event.target===modal){closeModal();return}
+  const b=event.target.closest('[data-action]');
+  if(!b||b.disabled||b.getAttribute('aria-disabled')==='true')return;
+  const {action,provider,account}=b.dataset;
+  switch(action){
+    case 'refresh':startAction('snapshot');break;
+    case 'add':openModal('add-overlay');break;
+    case 'add-provider':closeModal();if(names[provider]){pendingAdd=provider;startAction('add_auto',provider)}break;
+    case 'quit':send('quit');break;
+    case 'prev':case 'next':rotate(provider,action==='prev'?-1:1);break;
+    case 'select':case 'login':startAction(action,provider,account);break;
+    case 'hide':pendingHide={provider,account};$('hide-title').textContent=`Hide ${names[provider]} · ${account}?`;openModal('hide-overlay');break;
+    case 'confirm-hide':{const h=pendingHide;pendingHide=null;closeModal();if(h)startAction('remove',h.provider,h.account);break}
+    case 'close-dialog':pendingHide=null;closeModal();break;
+    case 'update':startUpdate();break;
+    case 'update-later':updateHidden=true;renderUpdate();break;
+    case 'dismiss-error':errors[b.dataset.kind]=null;render();break;
+  }
+});
+document.addEventListener('keydown',event=>{
+  if(modal){
+    if(event.key==='Escape'){event.preventDefault();pendingHide=null;closeModal()}
+    else if(event.key==='Tab'){
+      const items=[...modal.querySelectorAll('button:not(:disabled)')];if(!items.length)return;
+      const first=items[0],last=items[items.length-1];
+      if(event.shiftKey&&(document.activeElement===first||!modal.contains(document.activeElement))){event.preventDefault();last.focus()}
+      else if(!event.shiftKey&&(document.activeElement===last||!modal.contains(document.activeElement))){event.preventDefault();first.focus()}
+    }
+    return;
+  }
+  if((event.key==='ArrowLeft'||event.key==='ArrowRight')&&!event.metaKey&&!event.altKey&&!event.ctrlKey){
+    const box=event.target.closest?.('.carousel');
+    if(box&&Number(box.dataset.count)>1){event.preventDefault();rotate(box.dataset.provider,event.key==='ArrowLeft'?-1:1)}
+  }
+});
+let swipe=0,swipeAt=0,swipeLock=0;
+$('cards').addEventListener('wheel',event=>{const box=event.target.closest('.carousel');if(!box||Math.abs(event.deltaX)<=Math.abs(event.deltaY))return;event.preventDefault();if(Date.now()<swipeLock)return;if(Date.now()-swipeAt>200)swipe=0;swipeAt=Date.now();swipe+=event.deltaX;if(Math.abs(swipe)>40){rotate(box.dataset.provider,swipe>0?1:-1);swipe=0;swipeLock=Date.now()+450}},{passive:false});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){updateTimes();measure(true)}});
+setInterval(updateTimes,60000);
+
+document.querySelectorAll('[data-icon]').forEach(node=>node.insertAdjacentHTML('afterbegin',icon(node.dataset.icon)));
+render();
 </script></body></html>
