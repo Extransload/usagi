@@ -2,6 +2,12 @@
 
 All notable changes to Usagi. Each `## X.Y.Z` section is used as the release notes for that version: `release.sh` and the Release workflow stop if the section is missing.
 
+## 1.0.6
+
+### Fixed
+
+- Codex plans are capitalized like Claude's ("Team", "Free" instead of "team", "free").
+
 ## 1.0.5
 
 ### Changed
