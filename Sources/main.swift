@@ -43,44 +43,34 @@ enum LaunchEnvironment {
         return values
     }
 
-    /// Applies `wanted` (nil = the option is off) off the main thread. What Usagi set, and any value it replaced,
-    /// is recorded before each launchctl call, so a quit halfway can't leave an unrecorded value behind.
+    /// Applies `wanted` (nil = the option is off) off the main thread. Only someone else's replaced values are
+    /// recorded (to put them back later); if a provider's folder change fails, its trackers are left as they are.
     /// `failed` runs (on the main thread) when a call fails, so the next snapshot tries again.
-    static func sync(_ wanted: [String: AppEnvironment.Target]?, failed: @escaping @MainActor @Sendable () -> Void) {
+    static func sync(_ wanted: [String: AppEnvironment.Target]?, home: String, failed: @escaping @MainActor @Sendable () -> Void) {
         queue.async {
-            let defaults = UserDefaults.standard
-            var applied = defaults.dictionary(forKey: AppEnvironment.appliedKey) as? [String: String] ?? [:]
-            var previous = defaults.dictionary(forKey: AppEnvironment.previousKey) as? [String: String] ?? [:]
+            var previous = UserDefaults.standard.dictionary(forKey: AppEnvironment.previousKey) as? [String: String] ?? [:]
             let now = current(AppEnvironment.variables)
-            for (name, value) in applied where now[name] != value {  // changed since: no longer Usagi's
-                applied[name] = nil
-                previous[name] = nil
+            for name in AppEnvironment.variables {  // someone else's value is back (or set anew): nothing to put back
+                if let value = now[name], !AppEnvironment.isUsagis(name, value, home: home) { previous[name] = nil }
             }
-            var ok = true, folderFailed = Set<String>()  // providers whose folder couldn't be set: no trackers
-            for change in AppEnvironment.changes(wanted: wanted, current: now, applied: applied, previous: previous) {
-                let key = AppEnvironment.providers.first { ([$0.1] + AppEnvironment.names($0.3)).contains(change.name) }?.3 ?? ""
-                if change.ours && folderFailed.contains(key) { continue }
-                if change.ours {  // record first, so a quit halfway still knows the value is Usagi's
-                    if let before = now[change.name], before != applied[change.name] { previous[change.name] = before }
-                    applied[change.name] = change.value
-                    save(applied, previous)
+            var ok = true, folderFailed = Set<String>()
+            for change in AppEnvironment.changes(wanted: wanted, current: now, previous: previous, home: home) {
+                guard let owner = AppEnvironment.owner(change.name), !folderFailed.contains(owner.key) else { continue }
+                if change.ours, let before = now[change.name], !AppEnvironment.isUsagis(change.name, before, home: home) {
+                    previous[change.name] = before
+                    save(previous)
                 }
                 let done = run(change.value.map { ["setenv", change.name, $0] } ?? ["unsetenv", change.name]).ok
-                if !done, change.ours, AppEnvironment.providers.contains(where: { $0.1 == change.name }) { folderFailed.insert(key) }
-                if done && !change.ours {  // forget only once undone, so a failed undo is tried again
-                    applied[change.name] = nil
-                    previous[change.name] = nil
-                    save(applied, previous)
-                }
+                if done && !change.ours { previous[change.name] = nil }
+                if !done && owner.folder { folderFailed.insert(owner.key) }
                 ok = done && ok
             }
-            save(applied, previous)
+            save(previous)
             if !ok { DispatchQueue.main.async { MainActor.assumeIsolated { failed() } } }
         }
     }
 
-    private static func save(_ applied: [String: String], _ previous: [String: String]) {
-        UserDefaults.standard.set(applied, forKey: AppEnvironment.appliedKey)
+    private static func save(_ previous: [String: String]) {
         UserDefaults.standard.set(previous, forKey: AppEnvironment.previousKey)
     }
 
@@ -134,7 +124,7 @@ enum LaunchEnvironment {
 
     private let servicesMenu = NSMenu()
     private let alsoUseInAppsItem = NSMenuItem(title: "Also Use in Apps", action: #selector(toggleAlsoUseInApps), keyEquivalent: "")
-    private var syncedEnvironment: [String: AppEnvironment.Target]??  // what was last applied, to skip repeats
+    private var syncedSnapshot: Date?, syncedOff = false  // the snapshot last synced, to skip repeats
     private var requestedHeight: Double = 540
 
     private lazy var menu: NSMenu = {
@@ -241,18 +231,22 @@ enum LaunchEnvironment {
     @objc private func toggleAlsoUseInApps() {
         UserDefaults.standard.set(!alsoUseInApps, forKey: AppEnvironment.enabledKey)
         controller.setAlsoUseInApps(alsoUseInApps)
-        syncAppEnvironment()
+        syncAppEnvironment(force: true)
     }
 
-    /// Runs after every snapshot; launchctl is only called when the Active accounts or the option changed.
-    private func syncAppEnvironment() {
+    /// Runs after each new snapshot (and when the option is toggled): checks launchd and sets or undoes what
+    /// the Active accounts need. While the option is off, only the first sync after turning it off is needed.
+    private func syncAppEnvironment(force: Bool = false) {
+        if !force && controller.lastSuccess == syncedSnapshot { return }
         let wanted = alsoUseInApps ? controller.snapshot.map { AppEnvironment.wanted($0, home: NSHomeDirectory()) } : nil
         if alsoUseInApps && wanted == nil { return }  // no snapshot yet
-        // While it is on, every snapshot re-checks launchd (a few getenv calls), so a value someone else changed
-        // is set again; while it is off, only the first sync after turning it off is needed.
-        if wanted == nil, let synced = syncedEnvironment, synced == nil { return }
-        syncedEnvironment = .some(wanted)
-        LaunchEnvironment.sync(wanted) { [weak self] in self?.syncedEnvironment = nil }
+        if !force && wanted == nil && syncedOff { return }
+        syncedSnapshot = controller.lastSuccess
+        syncedOff = wanted == nil
+        LaunchEnvironment.sync(wanted, home: NSHomeDirectory()) { [weak self] in
+            self?.syncedSnapshot = nil
+            self?.syncedOff = false
+        }
     }
 
     private func showMenu() {

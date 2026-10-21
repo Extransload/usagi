@@ -384,17 +384,33 @@ enum BridgeOutput {
 }
 
 /// "Also Use in Apps": the launchd user environment that apps opened from now on inherit, so they use the
-/// Active accounts as new terminals do. A value someone else had set is put back when Usagi undoes its own.
+/// Active accounts as new terminals do. Usagi only ever sets its own profile folders and profile names, so a
+/// value of that shape is Usagi's (even if a quit or failure cut a change short) and anything else is someone
+/// else's, which Usagi remembers when it replaces it and puts back when it undoes its own.
 enum AppEnvironment {
     enum Target: Equatable { case value(String), unset }
+    struct Change: Equatable { let name: String, value: String?, ours: Bool }
 
-    static let enabledKey = "alsoUseInApps", appliedKey = "appEnvironmentSet", previousKey = "appEnvironmentPrevious"
+    static let enabledKey = "alsoUseInApps", previousKey = "appEnvironmentPrevious"
     static let providers = [("claude", "CLAUDE_CONFIG_DIR", ".claude", "CLAUDE"), ("codex", "CODEX_HOME", ".codex", "CODEX")]
-    /// The account variable plus the shell hooks' tracking variables: a terminal app opened while a profile
-    /// was set passes them to its new tabs, so usagi.zsh and Agent Kit's hook know to undo the inherited
-    /// folder once the Active account goes back to default.
-    static func names(_ key: String) -> [String] { ["_USAGI_\(key)_ACCOUNT", "_AGENTKIT_\(key)_ACCOUNT"] }
-    static var variables: [String] { providers.flatMap { [$0.1] + names($0.3) } }
+    /// The shell hooks' tracking variables: a terminal app opened while a profile was set passes them to its
+    /// new tabs, so usagi.zsh and Agent Kit's hook undo the inherited folder once the account is default again.
+    static func trackers(_ key: String) -> [String] { ["_USAGI_\(key)_ACCOUNT", "_AGENTKIT_\(key)_ACCOUNT"] }
+    static var variables: [String] { providers.flatMap { [$0.1] + trackers($0.3) } }
+
+    /// The provider key ("CLAUDE", "CODEX") a variable belongs to, and whether it is the folder variable.
+    static func owner(_ name: String) -> (key: String, folder: Bool)? {
+        for (_, variable, _, key) in providers where ([variable] + trackers(key)).contains(name) { return (key, variable == name) }
+        return nil
+    }
+
+    static func isUsagis(_ name: String, _ value: String, home: String) -> Bool {
+        guard let owner = owner(name) else { return false }
+        guard owner.folder else { return PageMessage.isAccount(value) }
+        let folder = providers.first { $0.3 == owner.key }!.2
+        let prefix = "\(home)/\(folder)-"
+        return value.hasPrefix(prefix) && PageMessage.isAccount(String(value.dropFirst(prefix.count)))
+    }
 
     /// Each variable's target: the Active profile's folder (and its name for the trackers), or unset for
     /// `default`. A provider missing from the snapshot, or a name that isn't a profile name, is left alone.
@@ -406,20 +422,18 @@ enum AppEnvironment {
                   active == "default" || PageMessage.isAccount(active) else { continue }
             let profile = active != "default"
             targets[variable] = profile ? .value("\(home)/\(folder)-\(active)") : .unset
-            for name in names(key) { targets[name] = profile ? .value(active) : .unset }
+            for name in trackers(key) { targets[name] = profile ? .value(active) : .unset }
         }
         return targets
     }
 
-    struct Change: Equatable { let name: String, value: String?, ours: Bool }
-
-    /// launchctl changes from `current` to `wanted` (nil when the option is off): set Usagi's value (`ours`),
-    /// or undo it, only while it still holds, by restoring the value it replaced or unsetting.
-    static func changes(wanted: [String: Target]?, current: [String: String], applied: [String: String],
-                        previous: [String: String]) -> [Change] {
+    /// launchctl changes from `current` to `wanted` (nil when the option is off): set Usagi's value (`ours`), or
+    /// undo Usagi's value by putting back the one it replaced (`previous`) or unsetting. Folders come first.
+    static func changes(wanted: [String: Target]?, current: [String: String], previous: [String: String],
+                        home: String) -> [Change] {
         var result: [Change] = []
         for variable in variables {
-            let now = current[variable], ours = now != nil && now == applied[variable]
+            let now = current[variable], ours = now.map { isUsagis(variable, $0, home: home) } ?? false
             switch wanted?[variable] {
             case .value(let value)? where now != value: result.append(Change(name: variable, value: value, ours: true))
             case .unset? where ours, nil where wanted == nil && ours:

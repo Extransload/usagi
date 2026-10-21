@@ -317,6 +317,9 @@ check(!asked.begin(now: checkedAt + 61, force: true), "but not twice at once")
 
 // Also Use in Apps
 func pairs(_ list: [AppEnvironment.Change]) -> [String] { list.map { "\($0.name)=\($0.value ?? "<unset>")\($0.ours ? "" : " (undo)")" } }
+func changes(_ wanted: [String: AppEnvironment.Target]?, _ current: [String: String], _ previous: [String: String] = [:]) -> [String] {
+    pairs(AppEnvironment.changes(wanted: wanted, current: current, previous: previous, home: "/Users/me"))
+}
 let me = "/Users/me", codex2 = "/Users/me/.codex-account-2"
 let envSnapshot: [String: Any] = ["providers": ["claude": ["active": "default"], "codex": ["active": "account-2"]]]
 let wanted = AppEnvironment.wanted(envSnapshot, home: me)
@@ -327,22 +330,26 @@ equal(wanted["_AGENTKIT_CODEX_ACCOUNT"], .value("account-2"), "Agent Kit tracker
 equal(wanted["_AGENTKIT_CLAUDE_ACCOUNT"], .unset, "trackers unset for default")
 check(AppEnvironment.wanted(["providers": ["claude": ["active": "../x"]]], home: "/h").isEmpty, "bad names are left alone")
 check(AppEnvironment.wanted(["providers": [:]], home: "/h").isEmpty, "missing providers are left alone")
+check(AppEnvironment.isUsagis("CODEX_HOME", codex2, home: me), "a profile folder is Usagi's")
+check(!AppEnvironment.isUsagis("CODEX_HOME", "/custom", home: me), "another folder is someone else's")
+check(!AppEnvironment.isUsagis("CODEX_HOME", "/Users/me/.codex-../x", home: me), "not a profile name")
+check(!AppEnvironment.isUsagis("CLAUDE_CONFIG_DIR", codex2, home: me), "another service's folder")
+check(AppEnvironment.isUsagis("_AGENTKIT_CLAUDE_ACCOUNT", "work", home: me), "a tracker holding a name")
 let codexSet = ["CODEX_HOME=\(codex2)", "_USAGI_CODEX_ACCOUNT=account-2", "_AGENTKIT_CODEX_ACCOUNT=account-2"]
-equal(pairs(AppEnvironment.changes(wanted: wanted, current: [:], applied: [:], previous: [:])), codexSet, "set the profile and trackers")
+equal(changes(wanted, [:]), codexSet, "set the profile and trackers")
 let codexNow = ["CODEX_HOME": codex2, "_USAGI_CODEX_ACCOUNT": "account-2", "_AGENTKIT_CODEX_ACCOUNT": "account-2"]
-equal(pairs(AppEnvironment.changes(wanted: wanted, current: codexNow, applied: codexNow, previous: [:])), [], "already set")
-equal(pairs(AppEnvironment.changes(wanted: wanted, current: codexNow.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-a"]) { $1 },
-                                   applied: codexNow.merging(["CLAUDE_CONFIG_DIR": "/Users/me/.claude-a"]) { $1 }, previous: [:])),
-      ["CLAUDE_CONFIG_DIR=<unset> (undo)"], "back to default undoes ours")
-equal(pairs(AppEnvironment.changes(wanted: wanted, current: codexNow.merging(["CLAUDE_CONFIG_DIR": "/mine"]) { $1 }, applied: codexNow, previous: [:])),
-      [], "default leaves a value Usagi didn't set")
-equal(pairs(AppEnvironment.changes(wanted: nil, current: codexNow, applied: codexNow, previous: ["CODEX_HOME": "/custom"])),
+equal(changes(wanted, codexNow), [], "already set")
+let claudeWork = ["CLAUDE_CONFIG_DIR": "/Users/me/.claude-work", "_USAGI_CLAUDE_ACCOUNT": "work", "_AGENTKIT_CLAUDE_ACCOUNT": "work"]
+equal(changes(wanted, codexNow.merging(claudeWork) { $1 }),
+      ["CLAUDE_CONFIG_DIR=<unset> (undo)", "_USAGI_CLAUDE_ACCOUNT=<unset> (undo)", "_AGENTKIT_CLAUDE_ACCOUNT=<unset> (undo)"],
+      "back to default undoes Usagi's values")
+equal(changes(wanted, codexNow.merging(["CLAUDE_CONFIG_DIR": "/mine"]) { $1 }), [], "default leaves someone else's value")
+equal(changes(nil, codexNow, ["CODEX_HOME": "/custom"]),
       ["CODEX_HOME=/custom (undo)", "_USAGI_CODEX_ACCOUNT=<unset> (undo)", "_AGENTKIT_CODEX_ACCOUNT=<unset> (undo)"],
-      "turning it off restores what Usagi replaced")
-equal(pairs(AppEnvironment.changes(wanted: nil, current: ["CODEX_HOME": "/changed"], applied: ["CODEX_HOME": codex2], previous: [:])),
-      [], "changed by someone else since")
-equal(pairs(AppEnvironment.changes(wanted: wanted, current: ["CODEX_HOME": "/custom"], applied: [:], previous: [:])).first,
-      "CODEX_HOME=\(codex2)", "a value someone else set is replaced (and remembered by the caller)")
+      "turning it off puts back what Usagi replaced")
+equal(changes(nil, ["CODEX_HOME": "/changed"]), [], "someone else's value is never undone")
+equal(changes(wanted, ["CODEX_HOME": "/Users/me/.codex-old"]).first, "CODEX_HOME=\(codex2)", "a stale Usagi folder is simply replaced")
+equal(changes(nil, ["CODEX_HOME": "/Users/me/.codex-old"]), ["CODEX_HOME=<unset> (undo)"], "and undone when off, even if unrecorded")
 
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)
