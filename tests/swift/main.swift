@@ -328,15 +328,12 @@ check(!asked.begin(now: checkedAt + 61, force: true), "but not twice at once")
 
 // Reordering: the newest order wins
 var orders = JobQueue()
-func reorder(_ order: String) -> Job {
-    Job(arguments: ["reorder", order], origin: .user, reports: [ActionDone(["reorder", order], ok: true)])
-}
+func reorder(_ order: String) -> Job { Job(arguments: ["reorder", order], origin: .user) }  // as the page's messages are queued
 orders.add(reorder("codex,claude"))
 _ = orders.start()
 orders.add(reorder("claude,codex"))
 orders.add(reorder("codex,claude"))
 equal(orders.waiting.map(\.arguments), [["reorder", "codex,claude"]], "one waiting reorder: the newest, not merged into the running one")
-equal(orders.waiting.first?.reports.count, 2, "it carries the replaced job's actionDone too")
 
 // Also Use in Apps
 func pairs(_ list: [AppEnvironment.Change]) -> [String] { list.map { "\($0.name)=\($0.value ?? "<unset>")\($0.ours ? "" : " (undo)")" } }

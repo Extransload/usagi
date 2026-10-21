@@ -105,7 +105,7 @@ Checked on the developer's Mac on 2026-10-21.
 
 Checked:
 
-- 100 Python tests, 219 Swift checks, and 273 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
+- 100 Python tests, 218 Swift checks, and 277 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
 - Reading Claude Max 20x, Codex Team and Codex Free accounts with the short `PATH` an app opened from Finder gets
 - A CLI installed the npm way (a `#!/usr/bin/env node` script next to its own `node` under `~/.nvm`, simulated with a stand-in CLI) found and run without Node on `PATH`
 - Starting with an empty home folder: no cards, an onboarding card, and the bridge's answers for signed-out and missing CLIs
