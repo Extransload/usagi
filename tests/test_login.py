@@ -218,6 +218,11 @@ class ClaudeLoginWorkerTests(IsolatedTest):
         self.assertEqual(self.run_worker("hang"), ("Sign-in timed out. Try again.", 1))
         self.assertLess(time.monotonic() - started, 5)
 
+    def test_browser_refusal_is_recorded(self):
+        # The real open-browser.sh refuses a non-https URL before opening anything.
+        self.assertEqual(self.run_worker("bad-url", browser=None),
+                         ("Could not open the sign-in page in a browser", 0))
+
 
 FAKE_CODEX_LOGIN = '''
 import json, os, sys
