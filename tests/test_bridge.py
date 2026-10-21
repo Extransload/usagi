@@ -306,9 +306,13 @@ class CodexLiveTests(IsolatedTest):
 
     def test_noise_server_requests_and_split_lines_are_handled(self):
         info = self.live('{"type": "chatgpt", "email": "a@example.com", "planType": "team"}')
-        self.assertEqual((info["status"], info["email"], info["plan"]), ("signed_in", "a@example.com", "team"))
+        self.assertEqual((info["status"], info["email"], info["plan"]), ("signed_in", "a@example.com", "Team"))
         self.assertEqual(info["windows"]["5h"]["used_percent"], 40)
         self.assertFalse(info["windows"]["5h"]["stale"])
+
+    def test_plan_names_are_capitalized_like_claude(self):
+        self.assertEqual([bridge.plan_name(value) for value in ("free", "team", "plus", "pro", "Business", "team_plus", "", None, 3)],
+                         ["Free", "Team", "Plus", "Pro", "Business", "Team Plus", None, None, None])
 
     def test_signed_out_and_api_key_accounts(self):
         self.assertEqual(self.live("None"), {"status": "signed_out"})

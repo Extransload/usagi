@@ -416,10 +416,18 @@ def codex_live(name):
     if account.get("type") != "chatgpt":
         return {"status": "signed_in"}
     windows = codex_windows(result_of(responses.get(3), "rateLimits"))
-    email, plan = account.get("email"), account.get("planType")
+    email = account.get("email")
     return {"status": "signed_in", "email": email if isinstance(email, str) else None,
-            "plan": plan if isinstance(plan, str) else None, "windows": windows,
+            "plan": plan_name(account.get("planType")), "windows": windows,
             "source": "Codex account limits · official app-server" if windows else None}
+
+
+def plan_name(value):
+    """Codex reports plan types in lowercase ("free", "team", "plus"); show them capitalized like Claude's ("Max 20x")."""
+    if not isinstance(value, str):
+        return None
+    words = [word for word in re.split(r"[\s_-]+", value) if word]
+    return " ".join(word[:1].upper() + word[1:] for word in words) or None
 
 
 def window_key(minutes, fallback):
