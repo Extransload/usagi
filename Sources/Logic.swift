@@ -77,18 +77,35 @@ enum MenuBar {
     static let staleAfter: TimeInterval = 15 * 60
     static let figureSpace = "\u{2007}"
 
-    /// Up to two cards for the title, plus how many more cards there are.
-    static func items(_ snapshot: [String: Any]) -> (items: [MenuBarItem], more: Int) {
+    static let defaultServiceLimit = 2
+    static let serviceLimitKey = "menuBarServices"  // UserDefaults: 1, 2, 3, or 0 for all
+
+    /// One item per service, in card order: the Active account's usage when its card is shown, else the
+    /// service's first card. At most `limit` services (nil for all); `more` counts the services left out,
+    /// so extra accounts of a shown service never add a "+N".
+    static func items(_ snapshot: [String: Any], limit: Int? = defaultServiceLimit) -> (items: [MenuBarItem], more: Int) {
         let cards = snapshot["cards"] as? [[String: Any]] ?? []
         let providers = snapshot["providers"] as? [String: Any] ?? [:]
-        let items = cards.prefix(2).map { card -> MenuBarItem in
-            let provider = card["provider"] as? String ?? ""
-            let accounts = (providers[provider] as? [String: Any])?["accounts"] as? [[String: Any]] ?? []
-            let account = accounts.first { $0["id"] as? String == card["id"] as? String }
-            let windows = account?["windows"] as? [String: Any] ?? [:]
+        var order: [String] = []
+        for case let provider? in cards.map({ $0["provider"] as? String }) where !order.contains(provider) {
+            order.append(provider)
+        }
+        let all = order.map { provider -> MenuBarItem in
+            let info = providers[provider] as? [String: Any] ?? [:]
+            let shown = cards.filter { $0["provider"] as? String == provider }.compactMap { $0["id"] as? String }
+            let id = (info["active"] as? String).flatMap { shown.contains($0) ? $0 : nil } ?? shown.first
+            let accounts = info["accounts"] as? [[String: Any]] ?? []
+            let windows = accounts.first { $0["id"] as? String == id }?["windows"] as? [String: Any] ?? [:]
             return MenuBarItem(provider: provider, percent: usedPercent(windows).flatMap(clampPercent))
         }
-        return (items, max(0, cards.count - 2))
+        let count = limit.map { max(1, $0) } ?? all.count
+        return (Array(all.prefix(count)), max(0, all.count - count))
+    }
+
+    /// The stored "Menu Bar Shows" choice: 0 (or anything unknown) means all services.
+    static func serviceLimit(stored: Int?) -> Int? {
+        guard let stored else { return defaultServiceLimit }
+        return (1...3).contains(stored) ? stored : nil
     }
 
     /// The higher of the 5-hour and weekly windows, else the highest of any window.

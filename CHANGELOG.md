@@ -2,6 +2,14 @@
 
 All notable changes to Usagi. Each `## X.Y.Z` section is used as the release notes for that version: `release.sh` and the Release workflow stop if the section is missing.
 
+## 1.0.5
+
+### Changed
+
+- The menu grows to fit your cards and only scrolls when they are taller than the screen; it never scrolls sideways.
+- Accounts are named by their email instead of the profile name (`default`, `account-2`). An account that isn't signed in yet shows as "Account 2" and so on; hover over it to see its profile folder.
+- The menu bar shows one item per service, for its **Active** account, so a second Codex account no longer adds "+1". "+N" now counts services beyond the limit, which you choose in the right-click menu under **Menu Bar Shows** (1, 2, 3 or all services; 2 by default).
+
 ## 1.0.4
 
 ### Added

@@ -69,6 +69,13 @@ enum Updates {
         let menu = NSMenu()
         menu.addItem(withTitle: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "r").target = self
         menu.addItem(withTitle: "Check for Updates", action: #selector(checkForUpdatesNow), keyEquivalent: "").target = self
+        let shows = NSMenu()
+        for (title, value) in [("1 Service", 1), ("2 Services", 2), ("3 Services", 3), ("All Services", 0)] {
+            let item = shows.addItem(withTitle: title, action: #selector(setMenuBarServices(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = value
+        }
+        menu.addItem(withTitle: "Menu Bar Shows", action: nil, keyEquivalent: "").submenu = shows
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Usagi", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q").target = NSApp
         return menu
@@ -128,7 +135,19 @@ enum Updates {
         }
     }
 
+    /// How many services the menu bar shows before "+N" (UserDefaults; 0 = all).
+    private var serviceLimit: Int? {
+        MenuBar.serviceLimit(stored: UserDefaults.standard.object(forKey: MenuBar.serviceLimitKey) as? Int)
+    }
+
+    @objc private func setMenuBarServices(_ sender: NSMenuItem) {
+        UserDefaults.standard.set(sender.tag, forKey: MenuBar.serviceLimitKey)
+        updateStatus()
+    }
+
     private func showMenu() {
+        let chosen = serviceLimit ?? 0
+        menu.items.first { $0.submenu != nil }?.submenu?.items.forEach { $0.state = $0.tag == chosen ? .on : .off }
         if popover.isShown { popover.performClose(nil) }
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
@@ -179,7 +198,7 @@ enum Updates {
         guard let button = statusItem.button else { return }
         let stale = MenuBar.isStale(lastSuccess: controller.lastSuccess, failed: controller.lastError != nil, now: Date())
         button.toolTip = MenuBar.tooltip(updated: controller.lastSuccess.map(Self.timeText), error: controller.lastError)
-        let (items, more) = controller.snapshot.map(MenuBar.items) ?? ([], 0)
+        let (items, more) = controller.snapshot.map { MenuBar.items($0, limit: serviceLimit) } ?? ([], 0)
         button.setAccessibilityLabel(MenuBar.accessibilityLabel(items, more: more, stale: stale))
         guard !items.isEmpty else {
             button.attributedTitle = NSAttributedString(string: "")

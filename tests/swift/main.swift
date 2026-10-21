@@ -89,7 +89,22 @@ let snapshot: [String: Any] = [
 ]
 let menu = MenuBar.items(snapshot)
 equal(menu.items, [MenuBarItem(provider: "claude", percent: 42), MenuBarItem(provider: "codex", percent: 12)], "items")
-equal(menu.more, 1, "more")
+equal(menu.more, 0, "a second Codex account is not another service")
+var activeSecond = snapshot
+activeSecond["providers"] = [
+    "claude": ["active": "default", "accounts": [account("default", ["5h": 41.6])]],
+    "codex": ["active": "account-2", "accounts": [account("default", ["30d": 12.4]), account("account-2", ["5h": 70])]],
+]
+equal(MenuBar.items(activeSecond).items.last, MenuBarItem(provider: "codex", percent: 70), "the Active account's usage")
+var hiddenActive = activeSecond
+hiddenActive["cards"] = [["provider": "claude", "id": "default"], ["provider": "codex", "id": "default"]]
+equal(MenuBar.items(hiddenActive).items.last, MenuBarItem(provider: "codex", percent: 12), "Active card hidden: first card")
+equal(MenuBar.items(snapshot, limit: 1).items, [MenuBarItem(provider: "claude", percent: 42)], "limit 1")
+equal(MenuBar.items(snapshot, limit: 1).more, 1, "one service left out")
+equal(MenuBar.items(snapshot, limit: nil).items.count, 2, "all services")
+equal(MenuBar.serviceLimit(stored: nil), 2, "default limit")
+equal(MenuBar.serviceLimit(stored: 3), 3, "stored limit")
+equal(MenuBar.serviceLimit(stored: 0), nil, "0 means all")
 equal(MenuBar.items(["cards": [], "providers": [:]]).items, [], "no cards")
 equal(MenuBar.items(["cards": [["provider": "claude", "id": "gone"]], "providers": [:]]).items,
       [MenuBarItem(provider: "claude", percent: nil)], "missing account")
