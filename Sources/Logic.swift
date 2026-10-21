@@ -382,3 +382,39 @@ enum BridgeOutput {
         return "The usage reader failed (exit status \(status))."
     }
 }
+
+/// "Also Use in Apps": the launchd user environment that apps opened from now on inherit, so they use the
+/// Active accounts as new terminals do. Usagi only ever undoes values it set itself.
+enum AppEnvironment {
+    enum Target: Equatable { case folder(String), unset }
+
+    static let enabledKey = "alsoUseInApps", appliedKey = "appEnvironmentSet"
+    static let variables = [("claude", "CLAUDE_CONFIG_DIR", ".claude"), ("codex", "CODEX_HOME", ".codex")]
+
+    /// Each variable's target for the Active accounts: the profile folder, or unset for `default`.
+    static func wanted(_ snapshot: [String: Any], home: String) -> [String: Target] {
+        let providers = snapshot["providers"] as? [String: Any] ?? [:]
+        var targets: [String: Target] = [:]
+        for (provider, variable, folder) in variables {
+            guard let active = (providers[provider] as? [String: Any])?["active"] as? String else { continue }
+            targets[variable] = active != "default" && PageMessage.isAccount(active) ? .folder("\(home)/\(folder)-\(active)") : .unset
+        }
+        return targets
+    }
+
+    /// launchctl changes (variable, value or nil to unset) from `current` to `wanted` (nil when the option is
+    /// off). A variable is unset only while it still holds the value Usagi set (`applied`).
+    static func changes(wanted: [String: Target]?, current: [String: String], applied: [String: String]) -> [(String, String?)] {
+        var result: [(String, String?)] = []
+        for (_, variable, _) in variables {
+            let now = current[variable], ours = now != nil && now == applied[variable]
+            switch wanted?[variable] {
+            case .folder(let value)? where now != value: result.append((variable, value))
+            case .unset? where ours: result.append((variable, nil))
+            case nil where wanted == nil && ours: result.append((variable, nil))
+            default: break
+            }
+        }
+        return result
+    }
+}

@@ -211,13 +211,16 @@ function extras(a){
     return '';
   }).join('');
 }
+let alsoUseInApps=false;
+window.setAlsoUseInApps=function(o){alsoUseInApps=!!o?.enabled;render()};
 function card(g,a,index){
   const p=g.source,id=a.id,status=statusOf(a),isDefault=id===g.active,count=g.accounts.length;
   const cached=status==='unknown'?lastGood[`${p}:${id}`]:null;
   const plan=a.plan||cached?.plan,name=accountName(p,a),label=`${names[p]} · ${name}`;
   const nav=count>1?`<span class="nav-group"><button class="nav" data-action="prev" data-provider="${esc(p)}" data-key="${esc(p)}:prev" aria-label="Previous ${names[p]} account" title="Previous account">${icon('prev')}</button><span class="count"><span aria-hidden="true">${index+1}/${count}</span><span class="sr-only">${index+1} of ${count}</span></span><button class="nav" data-action="next" data-provider="${esc(p)}" data-key="${esc(p)}:next" aria-label="Next ${names[p]} account" title="Next account">${icon('next')}</button></span>`:'';
   const head=`<div class="card-head"><div class="glyph"><img src="${esc(iconSrc(p))}" alt=""></div><h2 class="brand" id="${esc(p)}-name">${names[p]}</h2><span class="spacer"></span>${nav}</div>`;
-  const badge=isDefault?'<span class="badge" title="New terminals use this account">Active</span>':'';
+  const users=alsoUseInApps?'New terminals and apps':'New terminals';
+  const badge=isDefault?`<span class="badge" title="${users} use this account">Active</span>`:'';
   const identity=`<div class="identity"><span class="email" id="${esc(p)}-account" title="${esc(`${name} · saved in ${folderOf(p,id)}`)}">${esc(name)}</span>${plan?`<span class="plan">${esc(plan)}</span>`:''}${badge}</div>`;
   const hide=button('act hide','hide',p,id,'hide','','Hide',`Hide ${label}`);
   const signIn=a.connecting?'Reopen sign-in':'Sign in';
@@ -233,7 +236,8 @@ function card(g,a,index){
     if(status==='unknown')notes+=`<p class="note">${icon('alert')}<span>${own||cached?"Couldn't check sign-in · showing last reading":"Couldn't check sign-in"}</span></p>`;
     if(a.connecting)notes+=`<p class="note">${SPINNER}<span>Waiting for sign-in in your browser…</span></p>`;
     else if(a.login_error)notes+=`<p class="note warn" title="${esc(a.login_error)}">${icon('alert')}<span>Sign-in failed: ${esc(a.login_error)}</span></p>`;
-    const select=button('act select','select',p,id,'use','','Use in new terminals',isDefault?'New terminals use this account':`Use ${label} in new terminals`,{pressed:isDefault,disabled:isDefault});
+    const where=alsoUseInApps?'new terminals and apps':'new terminals';
+    const select=button('act select','select',p,id,'use','',`Use in ${where}`,isDefault?`${users} use this account`:`Use ${label} in ${where}`,{pressed:isDefault,disabled:isDefault});
     const again=a.connecting?'Reopen sign-in':'Sign in again';
     body=`${meters(p,own||cached?.windows,a.source)}${extras(a)}${notes}<div class="strip">${select}${button('act login','login',p,id,'login','',again,`${again} to ${label}`)}${hide}</div>`;
   }

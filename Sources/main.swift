@@ -30,6 +30,46 @@ enum Updates {
     }
 }
 
+/// `launchctl` in the user's launchd domain: the environment apps opened from now on inherit (no admin rights needed).
+enum LaunchEnvironment {
+    private static let queue = DispatchQueue(label: "usagi.launchctl", qos: .utility)
+
+    static func current(_ names: [String]) -> [String: String] {
+        var values: [String: String] = [:]
+        for name in names {
+            let value = run(["getenv", name]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { values[name] = value }
+        }
+        return values
+    }
+
+    /// Applies `wanted` (nil = the option is off) off the main thread and records what Usagi set.
+    static func sync(_ wanted: [String: AppEnvironment.Target]?) {
+        queue.async {
+            let defaults = UserDefaults.standard
+            var applied = defaults.dictionary(forKey: AppEnvironment.appliedKey) as? [String: String] ?? [:]
+            let names = AppEnvironment.variables.map { $0.1 }
+            for (name, value) in AppEnvironment.changes(wanted: wanted, current: current(names), applied: applied) {
+                _ = run(value.map { ["setenv", name, $0] } ?? ["unsetenv", name])
+                applied[name] = value
+            }
+            defaults.set(applied, forKey: AppEnvironment.appliedKey)
+        }
+    }
+
+    @discardableResult private static func run(_ arguments: [String]) -> String {
+        let process = Process(), output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return "" }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+    }
+}
+
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
@@ -66,6 +106,8 @@ enum Updates {
     }()
 
     private let servicesMenu = NSMenu()
+    private let alsoUseInAppsItem = NSMenuItem(title: "Also Use in Apps", action: #selector(toggleAlsoUseInApps), keyEquivalent: "")
+    private var syncedEnvironment: [String: AppEnvironment.Target]??  // what was last applied, to skip repeats
     private var requestedHeight: Double = 540
 
     private lazy var menu: NSMenu = {
@@ -78,6 +120,8 @@ enum Updates {
             item.tag = value
         }
         menu.addItem(withTitle: "Menu Bar Shows", action: nil, keyEquivalent: "").submenu = servicesMenu
+        alsoUseInAppsItem.target = self
+        menu.addItem(alsoUseInAppsItem)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Usagi", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q").target = NSApp
         return menu
@@ -116,6 +160,7 @@ enum Updates {
         popover.animates = true
         popover.delegate = self
         controller.loadViewIfNeeded()
+        controller.setAlsoUseInApps(alsoUseInApps)
         updateStatus()
         refreshIcons()
         checkForUpdate()
@@ -163,7 +208,26 @@ enum Updates {
         updateStatus()
     }
 
+    private var alsoUseInApps: Bool { UserDefaults.standard.bool(forKey: AppEnvironment.enabledKey) }
+
+    /// Off: undo what Usagi set. On: apps opened from now on use the Active accounts, like new terminals.
+    @objc private func toggleAlsoUseInApps() {
+        UserDefaults.standard.set(!alsoUseInApps, forKey: AppEnvironment.enabledKey)
+        controller.setAlsoUseInApps(alsoUseInApps)
+        syncAppEnvironment()
+    }
+
+    /// Runs after every snapshot; launchctl is only called when the Active accounts or the option changed.
+    private func syncAppEnvironment() {
+        let wanted = alsoUseInApps ? controller.snapshot.map { AppEnvironment.wanted($0, home: NSHomeDirectory()) } : nil
+        if alsoUseInApps && wanted == nil { return }  // no snapshot yet
+        if let synced = syncedEnvironment, synced == wanted { return }
+        syncedEnvironment = .some(wanted)
+        LaunchEnvironment.sync(wanted)
+    }
+
     private func showMenu() {
+        alsoUseInAppsItem.state = alsoUseInApps ? .on : .off
         let chosen = serviceLimit ?? 0
         servicesMenu.items.forEach { $0.state = $0.tag == chosen ? .on : .off }
         if popover.isShown { popover.performClose(nil) }
@@ -209,6 +273,7 @@ enum Updates {
     /// One item per service (its Active account) up to the Menu Bar Shows limit, or the rabbit when there are no cards. Dimmed (and
     /// "not up to date" for VoiceOver) when the last refresh failed or the last success is older than 15 minutes.
     private func updateStatus() {
+        syncAppEnvironment()
         guard let button = statusItem.button else { return }
         let stale = MenuBar.isStale(lastSuccess: controller.lastSuccess, failed: controller.lastError != nil, now: Date())
         button.toolTip = MenuBar.tooltip(updated: controller.lastSuccess.map(Self.timeText), error: controller.lastError)

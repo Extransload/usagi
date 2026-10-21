@@ -2,6 +2,12 @@
 
 All notable changes to Usagi. Each `## X.Y.Z` section is used as the release notes for that version: `release.sh` and the Release workflow stop if the section is missing.
 
+## 1.0.8
+
+### Added
+
+- **Also Use in Apps** in the right-click menu: apps you open from now on (not only new terminals) use each service's **Active** account, if they run Claude Code or Codex underneath, such as editor extensions and the Codex desktop app. Apps that are already open need to be reopened. Turning it off undoes only what Usagi set; it also resets when you log out.
+
 ## 1.0.7
 
 ### Added

@@ -92,6 +92,14 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 
     func checkForUpdatesFromMenu() { callPage("checkForUpdates") }
 
+    private var alsoUseInApps = false
+
+    /// Lets the page say "new terminals and apps" when Also Use in Apps is on.
+    func setAlsoUseInApps(_ enabled: Bool) {
+        alsoUseInApps = enabled
+        callPage("setAlsoUseInApps", json: ["enabled": enabled])
+    }
+
     private func setAsleep(_ value: Bool) {
         guard value != asleep else { return }
         asleep = value
@@ -131,6 +139,7 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         sendProviderIcons()
         if let update { callPage("setUpdate", json: update) }
+        callPage("setAlsoUseInApps", json: ["enabled": alsoUseInApps])
         if let snapshotData { callPage("receiveSnapshot", base64: snapshotData) }
         if let errorData { callPage("receiveError", base64: errorData) }
         if shown { callPage("popoverShown") }

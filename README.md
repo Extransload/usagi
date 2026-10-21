@@ -15,7 +15,7 @@ Needs macOS 14 or later and the Claude Code or Codex CLI ([requirements](#requir
 
 <img src="docs/screenshot.png" width="380" alt="Usagi menu with a Claude card and a Codex card showing 5-hour, weekly and model limits, when each reading was updated and when each limit resets">
 
-- A rabbit icon or your usage percentages appear in the menu bar: one per service (Claude, Codex), for the account marked **Active** (or the service's first card when that account is hidden). Click it to open the account cards; right-click it for **Refresh Now**, **Check for Updates**, **Menu Bar Shows** (1, 2 or all services before a "+N") and **Quit Usagi**.
+- A rabbit icon or your usage percentages appear in the menu bar: one per service (Claude, Codex), for the account marked **Active** (or the service's first card when that account is hidden). Click it to open the account cards; right-click it for **Refresh Now**, **Check for Updates**, **Menu Bar Shows** (1, 2 or all services before a "+N"), **Also Use in Apps** and **Quit Usagi**.
 - To start Usagi when you log in, add it under **System Settings > General > Login Items**.
 - Usagi is not signed or notarized by Apple. So that it opens right away, the Homebrew install removes the macOS quarantine flag. That skips Apple's check, so install it only if you trust this repository. From 1.0.3 on, every release zip is built by GitHub Actions and can be checked with `gh attestation verify` ([SECURITY.md](SECURITY.md)).
 
@@ -56,6 +56,8 @@ Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the C
   ```sh
   for usagi in /Applications ~/Applications; do [[ -r $usagi/Usagi.app/Contents/Resources/usagi.zsh ]] && { source $usagi/Usagi.app/Contents/Resources/usagi.zsh; break; }; done
   ```
+
+  To have apps use it too (anything that runs Claude Code or Codex underneath, such as editor extensions and the Codex desktop app), turn on **Also Use in Apps** in the right-click menu. Usagi then sets `CLAUDE_CONFIG_DIR` and `CODEX_HOME` for apps you open from now on (`launchctl setenv`, no admin rights); reopen apps that are already open. Chat logins in the Claude and ChatGPT apps, and tools that keep their own sign-in, aren't affected. Turning it off undoes only what Usagi set, and it also resets when you log out.
 
 - **Hide** (the crossed-out eye) only hides the card. The account stays signed in and keeps its profile folder; add it back with **＋**.
 - Each limit shows when its reading was taken (**Updated 4m ago**) and when the limit resets. A reading that may be out of date says so, and a limit that has reset since the last reading shows **Reset** until the CLI reports a new value.
@@ -102,7 +104,7 @@ Checked on the developer's Mac on 2026-10-21.
 
 Checked:
 
-- 99 Python tests, 184 Swift checks, and 252 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
+- 99 Python tests, 193 Swift checks, and 255 checks of the menu page in a real WebKit view in light and dark mode, with no script errors or Content Security Policy violations
 - Reading Claude Max 20x, Codex Team and Codex Free accounts with the short `PATH` an app opened from Finder gets
 - A CLI installed the npm way (a `#!/usr/bin/env node` script next to its own `node` under `~/.nvm`, simulated with a stand-in CLI) found and run without Node on `PATH`
 - Starting with an empty home folder: no cards, an onboarding card, and the bridge's answers for signed-out and missing CLIs

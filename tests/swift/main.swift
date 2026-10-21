@@ -315,5 +315,23 @@ check(!asked.begin(now: checkedAt + 60), "waits 6 h")
 check(asked.begin(now: checkedAt + 60, force: true), "the user can check now")
 check(!asked.begin(now: checkedAt + 61, force: true), "but not twice at once")
 
+// Also Use in Apps
+func pairs(_ list: [(String, String?)]) -> [String] { list.map { "\($0.0)=\($0.1 ?? "<unset>")" } }
+let envSnapshot: [String: Any] = ["providers": ["claude": ["active": "default"], "codex": ["active": "account-2"]]]
+let wanted = AppEnvironment.wanted(envSnapshot, home: "/Users/me")
+equal(wanted["CLAUDE_CONFIG_DIR"], .unset, "default is unset")
+equal(wanted["CODEX_HOME"], .folder("/Users/me/.codex-account-2"), "profile folder")
+equal(AppEnvironment.wanted(["providers": ["claude": ["active": "../x"]]], home: "/h")["CLAUDE_CONFIG_DIR"], .unset, "bad names ignored")
+equal(pairs(AppEnvironment.changes(wanted: wanted, current: [:], applied: [:])), ["CODEX_HOME=/Users/me/.codex-account-2"], "set the profile")
+equal(pairs(AppEnvironment.changes(wanted: wanted, current: ["CODEX_HOME": "/Users/me/.codex-account-2"], applied: [:])), [], "already set")
+equal(pairs(AppEnvironment.changes(wanted: wanted, current: ["CLAUDE_CONFIG_DIR": "/Users/me/.claude-a"], applied: ["CLAUDE_CONFIG_DIR": "/Users/me/.claude-a"])),
+      ["CLAUDE_CONFIG_DIR=<unset>", "CODEX_HOME=/Users/me/.codex-account-2"], "back to default undoes ours")
+equal(pairs(AppEnvironment.changes(wanted: wanted, current: ["CLAUDE_CONFIG_DIR": "/mine"], applied: [:])),
+      ["CODEX_HOME=/Users/me/.codex-account-2"], "a value Usagi didn't set stays")
+equal(pairs(AppEnvironment.changes(wanted: nil, current: ["CODEX_HOME": "/Users/me/.codex-account-2", "CLAUDE_CONFIG_DIR": "/mine"],
+                                   applied: ["CODEX_HOME": "/Users/me/.codex-account-2"])), ["CODEX_HOME=<unset>"], "turning it off undoes only ours")
+equal(pairs(AppEnvironment.changes(wanted: nil, current: ["CODEX_HOME": "/changed"], applied: ["CODEX_HOME": "/Users/me/.codex-account-2"])),
+      [], "changed by someone else since")
+
 print("\(checks - failures)/\(checks) checks passed")
 exit(failures == 0 ? 0 : 1)
