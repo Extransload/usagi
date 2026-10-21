@@ -2,6 +2,12 @@
 
 All notable changes to Usagi. Each `## X.Y.Z` section is used as the release notes for that version: `release.sh` and the Release workflow stop if the section is missing.
 
+## 1.0.10
+
+### Changed
+
+- Reordering is animated: while you drag a card, the cards it passes slide aside to show where it will land, and on release (or with ⌥↑ / ⌥↓) the cards glide into their new places. The lifted card is drawn solid and slightly raised. With Reduce Motion on, cards move without animation.
+
 ## 1.0.9
 
 ### Added

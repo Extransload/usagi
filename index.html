@@ -5,7 +5,7 @@
 <style>
 :root{color-scheme:light;
   --ink:#202124;--muted:#5d6066;--line:rgba(70,74,82,.16);
-  --card:rgba(255,255,255,.48);--control:rgba(255,255,255,.38);--control-hover:rgba(255,255,255,.7);--control-active:rgba(70,74,82,.12);--control-strong:rgba(255,255,255,.72);
+  --card:rgba(255,255,255,.48);--lift:rgba(250,250,252,.97);--control:rgba(255,255,255,.38);--control-hover:rgba(255,255,255,.7);--control-active:rgba(70,74,82,.12);--control-strong:rgba(255,255,255,.72);
   --shadow:rgba(23,27,37,.08);--focus:#2563c9;--dialog:rgba(248,248,250,.97);
   --blue:#3278de;--blue-text:#1f5fbf;--blue-button:#2563c9;--blue-button-hover:#2d6fd8;--blue-button-active:#1f56b0;--on-blue:#fff;
   --peach:#d97853;--peach-text:#a84a29;--amber:#b98123;--amber-text:#8a5a00;--red:#c94f62;--red-text:#b3263e;
@@ -13,7 +13,7 @@
 }
 @media(prefers-color-scheme:dark){:root{color-scheme:dark;
   --ink:#f5f5f7;--muted:#c1c3ca;--line:rgba(255,255,255,.19);
-  --card:rgba(255,255,255,.105);--control:rgba(255,255,255,.09);--control-hover:rgba(255,255,255,.17);--control-active:rgba(255,255,255,.05);--control-strong:rgba(255,255,255,.17);
+  --card:rgba(255,255,255,.105);--lift:rgba(58,59,64,.97);--control:rgba(255,255,255,.09);--control-hover:rgba(255,255,255,.17);--control-active:rgba(255,255,255,.05);--control-strong:rgba(255,255,255,.17);
   --shadow:rgba(0,0,0,.14);--focus:#82b8ff;--dialog:rgba(48,48,52,.97);
   --blue:#82b8ff;--blue-text:#9cc6ff;--blue-button:#82b8ff;--blue-button-hover:#9bc7ff;--blue-button-active:#6ea9f5;--on-blue:#10213d;
   --peach:#f5a47e;--peach-text:#f7ad8a;--amber:#f4cc78;--amber-text:#f4cc78;--red:#ff8fa4;--red-text:#ffa3b4;
@@ -48,8 +48,8 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 .slide.from-right{animation:slide-right .18s ease}.slide.from-left{animation:slide-left .18s ease}
 @keyframes slide-right{from{opacity:.2;transform:translateX(16px)}}@keyframes slide-left{from{opacity:.2;transform:translateX(-16px)}}
 .card-head{display:flex;align-items:center;gap:8px;min-width:0}
-.movable .card-head{cursor:grab;-webkit-user-select:none;user-select:none}.movable .card-head img{-webkit-user-drag:none}.carousel{position:relative}.carousel.dragging{position:relative;z-index:2;cursor:grabbing}.carousel.dragging .card{box-shadow:0 14px 30px var(--shadow);opacity:.95}
-.carousel.drop-before::before,.carousel.drop-after::after{content:'';position:absolute;left:8px;right:8px;height:3px;border-radius:2px;background:var(--blue)}.carousel.drop-before::before{top:-5px}.carousel.drop-after::after{bottom:-5px}
+.movable .card-head{cursor:grab;-webkit-user-select:none;user-select:none}.movable .card-head img{-webkit-user-drag:none}.carousel{position:relative}.carousel.dragging{position:relative;z-index:2;cursor:grabbing}.carousel.dragging .card{box-shadow:0 14px 30px var(--shadow);transform:scale(1.015);background:var(--lift)}
+#cards.sorting .carousel:not(.dragging){transition:transform .18s ease}.card{transition:box-shadow .2s ease,transform .2s ease}@media(prefers-reduced-motion:reduce){#cards .carousel{transition:none!important}}
 .glyph{width:26px;height:26px;border-radius:7px;overflow:hidden;flex:none}.glyph img{width:100%;height:100%;object-fit:cover;display:block}
 .brand{font-size:14px;font-weight:720;margin:0;flex:none}
 .nav-group{display:flex;flex:none;align-items:center;gap:3px}
@@ -493,10 +493,29 @@ function applyOrder(order){
 function moveService(p,step){
   const order=serviceOrder(),i=order.indexOf(p),j=i+step;
   if(i<0||j<0||j>=order.length)return;
-  order.splice(i,1);order.splice(j,0,p);applyOrder(order);
+  order.splice(i,1);order.splice(j,0,p);flip(()=>applyOrder(order));
+}
+// Cards glide to their new places: note where each one is drawn, make the change, then animate every card
+// from its old place to its new one (skipped with Reduce Motion).
+function flip(change){
+  const before=new Map([...document.querySelectorAll('#cards .carousel')].map(b=>[b.dataset.provider,b.getBoundingClientRect().top]));
+  change();
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  for(const b of document.querySelectorAll('#cards .carousel')){
+    const old=before.get(b.dataset.provider),dy=old==null?0:old-b.getBoundingClientRect().top;
+    if(Math.abs(dy)<1)continue;
+    b.style.transition='none';b.style.transform=`translateY(${dy}px)`;b.getBoundingClientRect();
+    b.style.transition='transform .24s cubic-bezier(.2,.8,.2,1)';b.style.transform='';
+    setTimeout(()=>{b.style.transition=''},300);
+  }
 }
 let drag=null;
-function clearDrop(){document.querySelectorAll('.drop-before,.drop-after').forEach(b=>b.classList.remove('drop-before','drop-after'))}
+// While dragging, the cards the dragged one passes slide up or down by its height to show where it will land.
+function makeRoom(target){
+  const slots=drag.slots,a=slots.findIndex(s=>s.box===drag.box),room=drag.room;
+  slots.forEach((s,i)=>{if(i===a)return;const shift=i>a&&i<=target?-room:i<a&&i>=target?room:0;s.box.style.transform=shift?`translateY(${shift}px)`:''});
+}
+function clearRoom(){document.querySelectorAll('#cards .carousel').forEach(b=>{if(!b.classList.contains('dragging'))b.style.transform=''})}
 $('cards').addEventListener('pointerdown',event=>{
   const head=event.target.closest('.card-head'),box=head?.closest('.carousel');
   if(!box||event.button!==0||event.target.closest('button')||serviceOrder().length<2)return;
@@ -507,25 +526,39 @@ addEventListener('pointermove',event=>{
   if(!drag||event.pointerId!==drag.id)return;
   if(!(event.buttons&1)){cancelDrag();return}  // the button was released somewhere we didn't hear about
   const dy=event.clientY-drag.y+($('cards').scrollTop-drag.scroll);
-  if(!drag.moved){if(Math.abs(dy)<5)return;drag.moved=true;drag.box.classList.add('dragging');try{drag.box.setPointerCapture(event.pointerId)}catch(error){}}
+  if(!drag.moved){
+    if(Math.abs(dy)<5)return;
+    drag.moved=true;drag.box.classList.add('dragging');$('cards').classList.add('sorting');
+    try{drag.box.setPointerCapture(event.pointerId)}catch(error){}
+    drag.slots=[...document.querySelectorAll('#cards .carousel')].map(box=>{const r=box.getBoundingClientRect();return {box,mid:r.top+r.height/2}});
+    const r=drag.box.getBoundingClientRect(),next=drag.box.nextElementSibling?.getBoundingClientRect();
+    drag.room=r.height+(next?Math.max(0,next.top-r.bottom):7);drag.mid=r.top+r.height/2;
+  }
   event.preventDefault();
-  drag.box.style.transform=`translateY(${Math.min(drag.max,Math.max(drag.min,dy))}px)`;  // stays inside the list, so no scrollbar appears
-  const p=drag.box.dataset.provider,others=[...document.querySelectorAll('#cards .carousel')].filter(b=>b.dataset.provider!==p);
-  let before=others.find(b=>{const r=b.getBoundingClientRect();return event.clientY<r.top+r.height/2});
-  clearDrop();
-  if(before)before.classList.add('drop-before');else if(others.length)others[others.length-1].classList.add('drop-after');
-  drag.target=before?before.dataset.provider:null;
+  const shift=Math.min(drag.max,Math.max(drag.min,dy));  // stays inside the list, so no scrollbar appears
+  drag.box.style.transform=`translateY(${shift}px)`;
+  // The slot it would land in: the cards (where they started) whose middle is above the dragged card's middle.
+  const center=drag.mid+shift,a=drag.slots.findIndex(s=>s.box===drag.box);
+  let target=drag.slots.filter((s,i)=>i!==a&&s.mid<center).length;
+  makeRoom(target);
+  const others=drag.slots.filter((s,i)=>i!==a);
+  drag.target=target<others.length?others[target].box.dataset.provider:null;
+  drag.index=target;
 });
 function cancelDrag(){if(drag)endDrag({pointerId:drag.id,type:'pointercancel'})}
 function endDrag(event){
   if(!drag||event.pointerId!==drag.id)return;
-  const d=drag;drag=null;clearDrop();d.box.classList.remove('dragging');d.box.style.transform='';
-  if(d.renderLater)render(...d.renderLater);
-  if(!d.moved||event.type==='pointercancel')return;
-  const p=d.box.dataset.provider,order=serviceOrder().filter(x=>x!==p);
-  if(d.target===p)return;
+  const d=drag;drag=null;
+  const p=d.box.dataset.provider,order=serviceOrder().filter(x=>x!==p),cancel=!d.moved||event.type==='pointercancel';
   const at=d.target?order.indexOf(d.target):order.length;
-  order.splice(at<0?order.length:at,0,p);applyOrder(order);
+  order.splice(at<0?order.length:at,0,p);
+  // Settle: every card glides from where it is drawn now (dragged, or moved aside) to its place in the new order.
+  flip(()=>{
+    $('cards').classList.remove('sorting');d.box.classList.remove('dragging');
+    document.querySelectorAll('#cards .carousel').forEach(b=>{b.style.transform=''});
+    if(d.renderLater)render(...d.renderLater);
+    if(!cancel)applyOrder(order);
+  });
 }
 addEventListener('blur',cancelDrag);document.addEventListener('visibilitychange',cancelDrag);
 $('cards').addEventListener('lostpointercapture',event=>{if(drag?.moved&&event.pointerId===drag.id)cancelDrag()});
