@@ -56,23 +56,32 @@ enum LaunchEnvironment {
                 applied[name] = nil
                 previous[name] = nil
             }
-            var ok = true
+            var ok = true, folderFailed = Set<String>()  // providers whose folder couldn't be set: no trackers
             for change in AppEnvironment.changes(wanted: wanted, current: now, applied: applied, previous: previous) {
-                if change.ours {
+                let key = AppEnvironment.providers.first { ([$0.1] + AppEnvironment.names($0.3)).contains(change.name) }?.3 ?? ""
+                if change.ours && folderFailed.contains(key) { continue }
+                if change.ours {  // record first, so a quit halfway still knows the value is Usagi's
                     if let before = now[change.name], before != applied[change.name] { previous[change.name] = before }
                     applied[change.name] = change.value
-                } else {
+                    save(applied, previous)
+                }
+                let done = run(change.value.map { ["setenv", change.name, $0] } ?? ["unsetenv", change.name]).ok
+                if !done, change.ours, AppEnvironment.providers.contains(where: { $0.1 == change.name }) { folderFailed.insert(key) }
+                if done && !change.ours {  // forget only once undone, so a failed undo is tried again
                     applied[change.name] = nil
                     previous[change.name] = nil
+                    save(applied, previous)
                 }
-                defaults.set(applied, forKey: AppEnvironment.appliedKey)
-                defaults.set(previous, forKey: AppEnvironment.previousKey)
-                ok = run(change.value.map { ["setenv", change.name, $0] } ?? ["unsetenv", change.name]).ok && ok
+                ok = done && ok
             }
-            defaults.set(applied, forKey: AppEnvironment.appliedKey)
-            defaults.set(previous, forKey: AppEnvironment.previousKey)
+            save(applied, previous)
             if !ok { DispatchQueue.main.async { MainActor.assumeIsolated { failed() } } }
         }
+    }
+
+    private static func save(_ applied: [String: String], _ previous: [String: String]) {
+        UserDefaults.standard.set(applied, forKey: AppEnvironment.appliedKey)
+        UserDefaults.standard.set(previous, forKey: AppEnvironment.previousKey)
     }
 
     private static func run(_ arguments: [String]) -> (ok: Bool, output: String) {
@@ -239,7 +248,9 @@ enum LaunchEnvironment {
     private func syncAppEnvironment() {
         let wanted = alsoUseInApps ? controller.snapshot.map { AppEnvironment.wanted($0, home: NSHomeDirectory()) } : nil
         if alsoUseInApps && wanted == nil { return }  // no snapshot yet
-        if let synced = syncedEnvironment, synced == wanted { return }
+        // While it is on, every snapshot re-checks launchd (a few getenv calls), so a value someone else changed
+        // is set again; while it is off, only the first sync after turning it off is needed.
+        if wanted == nil, let synced = syncedEnvironment, synced == nil { return }
         syncedEnvironment = .some(wanted)
         LaunchEnvironment.sync(wanted) { [weak self] in self?.syncedEnvironment = nil }
     }
