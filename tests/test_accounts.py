@@ -77,9 +77,13 @@ class ProfileTests(IsolatedTest):
         (claude / "CLAUDE.md").write_text("shared\n")
         for number, settings in enumerate((
                 {"apiKeyHelper": "~/bin/key.sh"},
-                {"env": {"ANTHROPIC_API_KEY": "placeholder"}},
-                {"env": {"ANTHROPIC_AUTH_TOKEN": "placeholder"}},
-                {"env": {"CLAUDE_CODE_OAUTH_TOKEN": "placeholder"}},
+                {"awsAuthRefresh": "aws sso login"},
+                {"awsCredentialExport": "~/bin/aws-creds.sh"},
+                *({"env": {key: "placeholder"}} for key in (
+                    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "AWS_BEARER_TOKEN_BEDROCK",
+                    "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_VERTEX_PROJECT_ID",
+                    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+                    "GOOGLE_APPLICATION_CREDENTIALS")),
                 "{not json",
                 [])):
             (claude / "settings.json").write_text(settings if isinstance(settings, str) else json.dumps(settings))
