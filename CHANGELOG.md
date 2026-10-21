@@ -23,11 +23,11 @@ All notable changes to Usagi. Each `## X.Y.Z` section is used as the release not
 - Menu bar: VoiceOver labels and a right-click menu.
 - Better accessibility and contrast throughout the menu.
 - If the Xcode Command Line Tools are missing, Usagi says how to install them instead of failing.
-- The menu's web view is locked down: a strict Content Security Policy, and only the bundled page can send commands to the app.
+- The menu's web view is locked down: a Content Security Policy that blocks remote content and `eval`, and only the bundled page can send commands to the app.
 
 ### Distribution
 
-- Releases are built by GitHub Actions from the tagged commit, with a build provenance attestation. Check a download with `gh attestation verify Usagi-1.0.3.zip -R Extransload/usagi`.
+- Releases are built by GitHub Actions from the tagged commit, with a build provenance attestation. Check a download with `gh attestation verify Usagi-1.0.3.zip -R Extransload/usagi --signer-workflow Extransload/usagi/.github/workflows/release.yml --source-ref refs/tags/v1.0.3` (see SECURITY.md).
 - CI runs the tests and a build on macOS 14, 15 and 26 and on an Intel Mac.
 - Homebrew: `brew uninstall --zap --cask usagi` now also removes Usagi's caches, preferences, web view data and login LaunchAgent, and `brew livecheck` works for the cask.
 - `install.sh` stops when the Homebrew cask is installed (the two would collide), checks for the Command Line Tools first, and `./install.sh --uninstall` removes a source install.

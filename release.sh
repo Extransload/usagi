@@ -27,13 +27,27 @@ on_exit() {  # also the ZERR trap: zsh skips EXIT traps when set -e fires inside
   stopped=1
   /bin/rm -rf "$work"
   (( exit_status == 0 )) || print -u2 -- "\nrelease.sh stopped during: $step
-Fix the cause and run ./release.sh $version again; finished steps are skipped."
+Fix the cause and run ./release.sh ${${check_only:#0}:+--check }$version again; finished steps are skipped."
 }
 trap on_exit EXIT
 trap on_exit ZERR
 say() { step=$1; print -- "==> $1"; }
 die() { print -u2 -- "error: $*"; exit 1; }
 version_gt() { [[ $1 != "$2" && $(printf '%s\n' "$1" "$2" | /usr/bin/sort -V | /usr/bin/tail -1) == "$1" ]]; }
+require_ci() {  # the CI workflow (all macOS versions and Intel) must have passed for this commit
+  local sha=$1 run id result
+  run=$(gh run list -R "$repo" --workflow ci.yml --commit "$sha" --limit 1 \
+    --json databaseId,status,conclusion --jq '.[0] // empty | "\(.databaseId) \(.status) \(.conclusion)"')
+  [[ -n $run ]] || die "No CI run for ${sha:0:12}. Push main and let CI finish first."
+  id=${run%% *} result=${run#* }
+  if [[ $result != completed* ]]; then
+    print "Waiting for CI: https://github.com/$repo/actions/runs/$id"
+    gh run watch "$id" -R "$repo" --exit-status --compact --interval 30 >/dev/null \
+      || die "CI failed for ${sha:0:12}: https://github.com/$repo/actions/runs/$id"
+  elif [[ $result != "completed success" ]]; then
+    die "CI did not pass for ${sha:0:12} (${result#completed }): https://github.com/$repo/actions/runs/$id"
+  fi
+}
 release_state() {  # "none", or "draft"/"published" plus "with zip"/"without zip"
   local query="(if .isDraft then \"draft\" else \"published\" end) + (if any(.assets[]; .name == \"$zip_name\") then \" with zip\" else \" without zip\" end)"
   gh release view "$tag" -R "$repo" --json isDraft,assets --jq "$query" 2>/dev/null || print none
@@ -43,7 +57,7 @@ say "Preflight"
 (( $+commands[gh] )) || die "Install the GitHub CLI (gh)."
 [[ $(git branch --show-current) == main ]] || die "Release from the main branch."
 [[ -z $(git status --porcelain) ]] || die "Commit or stash your changes first."
-gh auth status >/dev/null 2>&1 || die "Sign in to the GitHub CLI first: gh auth login"
+gh auth status --active --hostname github.com >/dev/null 2>&1 || die "Sign in to the GitHub CLI first: gh auth login"
 for r in $repo $tap_repo; do
   [[ $(gh api "repos/$r" --jq .permissions.push) == true ]] || die "Your gh account cannot push to $r."
 done
@@ -56,10 +70,21 @@ if tag_commit=$(git rev-parse -q --verify "refs/tags/$tag^{commit}"); then
   [[ $tag_commit == "$head" ]] || die "Tag $tag already exists at ${tag_commit:0:12}, not at HEAD (${head:0:12})."
   git merge-base --is-ancestor origin/main HEAD || die "origin/main has commits that HEAD does not; resolve that first."
   [[ $current == "$version" ]] || die "Tag $tag is at HEAD but Info.plist says $current."
+  require_ci "$(git rev-parse HEAD~1)"
+  tagged=1
+elif [[ $(git log -1 --format=%s) == "Release $version" && $(git rev-parse HEAD~1) == $(git rev-parse origin/main) \
+        && $current == "$version" ]]; then
+  # An earlier run committed the bump but stopped before tagging.
+  require_ci "$(git rev-parse HEAD~1)"
+  if (( ! check_only )); then
+    say "Tag the release commit as $tag"
+    git tag -a "$tag" -m "Usagi $version"
+  fi
   tagged=1
 else
   [[ $head == $(git rev-parse origin/main) ]] || die "main differs from origin/main; pull or push first."
   version_gt "$version" "$current" || die "$version is not greater than the current version $current."
+  require_ci "$head"
   tagged=0
   say "Run the tests"
   /usr/bin/python3 -m unittest discover -s tests

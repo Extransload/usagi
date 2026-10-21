@@ -12,7 +12,7 @@ zip, checks the result, publishes it and points the Homebrew cask at it.
 - `CHANGELOG.md` has a `## X.Y.Z` section for the new version, committed and pushed. It becomes
   the release notes, and both `release.sh` and the workflow stop without it.
 
-To rehearse without changing anything, run `./release.sh --check X.Y.Z`: it runs the checks and
+To rehearse without changing anything, run `./release.sh --check X.Y.Z` once `main` is pushed: it runs the checks and
 the tests and shows the state of the tag, the GitHub release and the cask.
 
 ## Release
@@ -23,7 +23,7 @@ the tests and shows the state of the tag, the GitHub release and the cask.
 
 | # | Step | What it does | When rerun |
 |---|---|---|---|
-| 1 | Preflight | Branch, clean tree, `origin/main`, `gh auth status`, push access to both repositories, the CHANGELOG section, and X.Y.Z greater than the version in `Info.plist` (`sort -V`) | Repeated |
+| 1 | Preflight | Branch, clean tree, `origin/main`, `gh auth status`, push access to both repositories, the CHANGELOG section, X.Y.Z greater than the version in `Info.plist` (`sort -V`), and a passing CI run for the commit being released (it waits if CI is still running) | Repeated |
 | 2 | Tests | `/usr/bin/python3 -m unittest discover -s tests` and `tests/swift/run.sh` | Skipped once the tag exists |
 | 3 | Bump and tag | `plutil -replace` of `CFBundleShortVersionString` and `CFBundleVersion` (+1) in `Info.plist`, commit `Release X.Y.Z`, annotated tag `vX.Y.Z` | Skipped if `vX.Y.Z` is at HEAD; stops if it points anywhere else |
 | 4 | Push | `git push --atomic origin main vX.Y.Z` | No-op when already pushed |
@@ -31,7 +31,7 @@ the tests and shows the state of the tag, the GitHub release and the cask.
 | 6 | Verify | Downloads the draft's zip, `gh attestation verify` (must come from `release.yml` for `refs/tags/vX.Y.Z`), unzips it, runs `verify-app.sh` on it and computes its sha256 | Repeated |
 | 7 | Publish | `gh release edit vX.Y.Z --draft=false --latest=false`: the zip is downloadable, but `releases/latest`, which the in-app update check reads, still points at the previous version | Skipped when published |
 | 8 | Public download | Downloads the public asset URL with `curl` and compares its sha256 | Repeated |
-| 9 | Cask | Sets `version` and `sha256` in the tap's `Casks/usagi.rb`, checks both lines exactly, runs `brew style`, commits `usagi X.Y.Z` and pushes | Skipped when the cask already has both |
+| 9 | Cask | Sets `version` and `sha256` in the tap's `Casks/usagi.rb`, checks both lines exactly, runs `brew style` when Homebrew is installed, commits `usagi X.Y.Z` and pushes | Skipped when the cask already has both |
 | 10 | Latest | `gh release edit vX.Y.Z --latest`: from now on the in-app update check offers X.Y.Z | Repeated |
 
 The order matters: the app only offers an update (step 10) after Homebrew can install it
@@ -49,11 +49,15 @@ again; finished steps are skipped.
   don't move it. Delete the draft (`gh release delete vX.Y.Z -R Extransload/usagi --yes`, which keeps
   the tag), fix the code on `main`, add a CHANGELOG section for the next patch version and release
   that.
-- **A push failed** (main and tag, or the tap): just run `release.sh` again.
+- **A push failed** (main and tag, or the tap): just run `release.sh` again. If `origin/main` moved
+  meanwhile, the atomic push is rejected; drop the local release commit and tag
+  (`git tag -d vX.Y.Z && git reset --hard origin/main`), pull, and start over.
+- **The bump was committed but tagging failed**: run `release.sh` again; it recognizes the
+  `Release X.Y.Z` commit on top of `origin/main` and tags it.
 
 ## Rolling back a bad release
 
-A published release is never edited or replaced; it is superseded by a newer one. (With
+A published release's zip is never replaced; a bad release is superseded by a newer one, and only its notes get a warning. (With
 immutable releases turned on for the repository, GitHub refuses to change its assets or tag
 anyway, and people may already have downloaded it.)
 
@@ -84,4 +88,5 @@ anyway, and people may already have downloaded it.)
 - The tap's `.github/workflows/check.yml` runs `brew style` and `brew audit --cask --online` on
   changed casks.
 - Anyone can check a release zip with
-  `gh attestation verify Usagi-X.Y.Z.zip -R Extransload/usagi` (see [SECURITY.md](../SECURITY.md)).
+  `gh attestation verify Usagi-X.Y.Z.zip -R Extransload/usagi --signer-workflow Extransload/usagi/.github/workflows/release.yml --source-ref refs/tags/vX.Y.Z`
+  (see [SECURITY.md](../SECURITY.md)).

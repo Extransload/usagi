@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Only the latest release receives fixes. Update with `brew upgrade --cask usagi`, or pull and run
+Only the latest release receives fixes. Update with `brew upgrade --cask extransload/tap/usagi`, or pull and run
 `./install.sh` again for a source install.
 
 ## Reporting a vulnerability
@@ -32,10 +32,11 @@ signed build provenance attestation. To check a download yourself (needs the Git
 
 ```sh
 gh release download v1.0.3 -R Extransload/usagi -p 'Usagi-*.zip'
-gh attestation verify Usagi-1.0.3.zip -R Extransload/usagi
+gh attestation verify Usagi-1.0.3.zip -R Extransload/usagi \
+  --signer-workflow Extransload/usagi/.github/workflows/release.yml --source-ref refs/tags/v1.0.3
 shasum -a 256 Usagi-1.0.3.zip   # compare with sha256 in Casks/usagi.rb of the tap
 ```
 
-`gh attestation verify` succeeds only if the zip is byte-for-byte what the release workflow of
-this repository built. Releases 1.0.0 to 1.0.2 were built on the maintainer's Mac and have no
+With `--signer-workflow` and `--source-ref`, `gh attestation verify` succeeds only if the zip is
+byte-for-byte what this repository's release workflow built from that version's tag. Releases 1.0.0 to 1.0.2 were built on the maintainer's Mac and have no
 attestation.

@@ -26,7 +26,6 @@ jobs:
     timeout-minutes: 30
     env:
       TAG: ${{ github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -67,6 +66,8 @@ jobs:
           subject-path: dist/Usagi-${{ env.VERSION }}.zip
 
       - name: Upload to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}  # only this step can write to the repository
         run: |
           notes="$RUNNER_TEMP/notes.md"
           {
@@ -74,13 +75,15 @@ jobs:
             echo
             echo "---"
             echo "Built by GitHub Actions on the ${ImageOS:-macOS} runner image ${ImageVersion:-unknown} ($RUNNER_ARCH) with $(/usr/bin/swiftc --version 2>&1 | head -1)."
-            echo "Verify the download with \`gh attestation verify Usagi-$VERSION.zip -R $GITHUB_REPOSITORY\`."
+            echo "Verify the download with \`gh attestation verify Usagi-$VERSION.zip -R $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref refs/tags/$TAG\`."
           } > "$notes"
           zip="dist/Usagi-$VERSION.zip"
-          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
-            [[ $draft == true ]] || { echo "::error::Release $TAG is already published; release a new version instead"; exit 1; }
+          if found=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>&1); then
+            [[ $found == true ]] || { echo "::error::Release $TAG is already published; release a new version instead"; exit 1; }
             gh release edit "$TAG" --title "Usagi $VERSION" --notes-file "$notes"
             gh release upload "$TAG" "$zip" --clobber
-          else
+          elif [[ $found == *"release not found"* ]]; then
             gh release create "$TAG" "$zip" --draft --verify-tag --title "Usagi $VERSION" --notes-file "$notes"
+          else
+            echo "::error::Could not look up release $TAG: $found"; exit 1
           fi

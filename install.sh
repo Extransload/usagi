@@ -22,8 +22,10 @@ done
 die() { print -u2 -- "$*"; exit 1; }
 run() { if (( dry_run )); then print -r -- "would run: ${(q-)@}"; else "$@"; fi; }
 cask=
-for prefix in /opt/homebrew /usr/local; do
-  [[ -d $prefix/Caskroom/usagi ]] && cask=$prefix/Caskroom/usagi
+caskrooms=(/opt/homebrew/Caskroom /usr/local/Caskroom)
+(( $+commands[brew] )) && caskrooms=($(brew --caskroom 2>/dev/null) $caskrooms)
+for room in $caskrooms; do
+  [[ -d $room/usagi ]] && { cask=$room/usagi; break; }
 done
 
 # Stops copies running from $app. Matches the whole command line exactly, so spaces in HOME are fine.
@@ -38,6 +40,7 @@ stop_running() {
   (( dry_run )) && return 0
   for pid in $pids; do
     while /bin/kill -0 $pid 2>/dev/null && (( SECONDS < deadline )); do /bin/sleep 0.1; done
+    /bin/kill -9 $pid 2>/dev/null || true  # still running after 5 s
   done
 }
 
@@ -45,13 +48,16 @@ if [[ $mode == uninstall ]]; then
   run /bin/launchctl bootout "$domain/$label" 2>/dev/null || true
   run /bin/rm -f "$plist"
   stop_running
+  kept=0
   if [[ -d $app && -n $cask && ! -e $app/Contents/Resources/source-install ]]; then
     print "Kept $app because it may be the Homebrew copy; remove that with: brew uninstall --cask usagi"
+    kept=1
   elif [[ -d $app ]]; then
     run /bin/rm -rf "$app"
   fi
   (( dry_run )) && exit 0
-  print "Usagi's source install is removed. Your cards and settings in ~/.config/usagi were kept;"
+  if (( kept )); then print "The LaunchAgent is removed."; else print "Usagi's source install is removed."; fi
+  print "Your cards and settings in ~/.config/usagi were kept;"
   print "delete that folder to remove them too, and remove the usagi.zsh line from ~/.zshrc if you added it."
   exit 0
 fi
