@@ -137,7 +137,8 @@ let updateInfo=null,updateHidden=false,updating=false,updateFailed=false,updateE
 const errors={setup:null,action:null,refresh:null};
 const busy=new Map(),carouselPos={},carouselIdx={},lastGood={},providerIcons={};
 
-// Busy state: one key per provider:account:action so repeat clicks are ignored until actionDone.
+// Busy state: one key per provider:account:action so repeat clicks are ignored until actionDone, which Swift
+// sends for every user action (also after a failure); the 90 s timer is only a safety net.
 const busyKey=(action,provider,account)=>`${provider||''}:${account||''}:${action}`;
 function setBusy(key,on){clearTimeout(busy.get(key));busy.delete(key);if(on)busy.set(key,setTimeout(()=>{busy.delete(key);render()},90000))}
 function startAction(action,provider,account){const key=busyKey(action,provider,account);if(busy.has(key))return;errors.action=null;setBusy(key,true);send(action,{provider,account});render()}
@@ -183,7 +184,7 @@ function card(g,a,index){
   const email=a.email||cached?.email,plan=a.plan||cached?.plan;
   const nav=count>1?`<span class="nav-group"><button class="nav" data-action="prev" data-provider="${esc(p)}" data-key="${esc(p)}:prev" aria-label="Previous ${names[p]} account" title="Previous account">${icon('prev')}</button><span class="count"><span aria-hidden="true">${index+1}/${count}</span><span class="sr-only">Account ${index+1} of ${count}</span></span><button class="nav" data-action="next" data-provider="${esc(p)}" data-key="${esc(p)}:next" aria-label="Next ${names[p]} account" title="Next account">${icon('next')}</button></span>`:'';
   const head=`<div class="card-head"><div class="glyph"><img src="${esc(iconSrc(p))}" alt=""></div><h2 class="brand" id="${esc(p)}-name">${names[p]}</h2><span class="spacer"></span><span class="account-pill" id="${esc(p)}-account" title="${esc(id)}">${esc(id)}</span>${nav}</div>`;
-  const badge=isDefault?'<span class="badge" title="New terminals use this account">Terminal default</span>':'';
+  const badge=isDefault?'<span class="badge" title="New terminals use this account">Active</span>':'';
   const identity=email||plan||badge?`<div class="identity">${email?`<span class="email" title="${esc(email)}">${esc(email)}</span>`:''}${plan?`<span class="plan">${esc(plan)}</span>`:''}${badge}</div>`:'';
   const hide=button('act hide','hide',p,id,'hide','','Hide',`Hide ${label}`);
   const signIn=a.connecting?'Reopen sign-in':'Sign in';
@@ -310,16 +311,16 @@ window.receiveSnapshot=function(encoded){
     pendingAdd=null;
   }
   lastData=data;remember(data);
-  errors.setup=null;errors.refresh=null;if(errors.action?.action==='snapshot')errors.action=null;
+  // An action error goes on a later Refresh, or on a snapshot 15 s after it appeared (dismiss and the next action clear it too).
+  errors.setup=null;errors.refresh=null;if(errors.action&&(errors.action.action==='snapshot'||Date.now()-errors.action.at>=15000))errors.action=null;
   render(moved,1);
   if(moved)announce(`Added ${names[moved]} · ${data.added}`);
 };
 window.receiveError=function(encoded){
   let e;try{e=decode(encoded)}catch(error){e={}}
   const kind=['action','refresh','setup'].includes(e?.kind)?e.kind:'action',action=String(e?.action||''),message=String(e?.message||'Something went wrong.');
-  if(kind!=='refresh'&&action)for(const k of [...busy.keys()])if(k.endsWith(':'+action))setBusy(k,false);
   if(action==='update'&&kind!=='refresh'&&updateInfo){updating=false;updateFailed=true;updateError=message;sourceInstall=false;updateHidden=false;clearTimeout(updateTimer);renderUpdate();return}
-  errors[kind]={kind,action,message};
+  errors[kind]={kind,action,message,at:Date.now()};
   render();
 };
 window.actionDone=function(encoded){
@@ -355,7 +356,8 @@ function startUpdate(){
   if(updating)return;
   updating=true;updateFailed=false;updateError='';sourceInstall=false;renderUpdate();send('update');
   clearTimeout(updateTimer);
-  updateTimer=setTimeout(()=>{if(updating){updating=false;updateFailed=true;renderUpdate()}},300000);
+  // The bridge gives each brew step 5 minutes; past 11 minutes the update is taken as failed.
+  updateTimer=setTimeout(()=>{if(updating){updating=false;updateFailed=true;renderUpdate()}},660000);
 }
 
 // Dialogs: modal with focus moved in, Tab trapped, focus returned to the opener (by data-key if it was re-rendered).
