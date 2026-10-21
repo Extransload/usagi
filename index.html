@@ -48,8 +48,8 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 .slide.from-right{animation:slide-right .18s ease}.slide.from-left{animation:slide-left .18s ease}
 @keyframes slide-right{from{opacity:.2;transform:translateX(16px)}}@keyframes slide-left{from{opacity:.2;transform:translateX(-16px)}}
 .card-head{display:flex;align-items:center;gap:8px;min-width:0}
-.movable .card-head{cursor:grab}.carousel.dragging{position:relative;z-index:2;cursor:grabbing}.carousel.dragging .card{box-shadow:0 14px 30px var(--shadow);opacity:.95}
-.carousel.drop-before::before,.carousel.drop-after::after{content:'';display:block;height:3px;border-radius:2px;background:var(--blue);margin:2px 8px 5px}
+.movable .card-head{cursor:grab;-webkit-user-select:none;user-select:none}.movable .card-head img{-webkit-user-drag:none}.carousel{position:relative}.carousel.dragging{position:relative;z-index:2;cursor:grabbing}.carousel.dragging .card{box-shadow:0 14px 30px var(--shadow);opacity:.95}
+.carousel.drop-before::before,.carousel.drop-after::after{content:'';position:absolute;left:8px;right:8px;height:3px;border-radius:2px;background:var(--blue)}.carousel.drop-before::before{top:-5px}.carousel.drop-after::after{bottom:2px}
 .glyph{width:26px;height:26px;border-radius:7px;overflow:hidden;flex:none}.glyph img{width:100%;height:100%;object-fit:cover;display:block}
 .brand{font-size:14px;font-weight:720;margin:0;flex:none}
 .nav-group{display:flex;flex:none;align-items:center;gap:3px}
@@ -115,7 +115,7 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 'use strict';
 const names={claude:'Claude',codex:'Codex'};
 const cliHint={claude:['Claude Code','claude'],codex:['The Codex CLI','codex']};
-const failText={snapshot:"Couldn't refresh",login:"Couldn't start sign-in",select:"Couldn't change the terminal account",remove:"Couldn't hide the account",add_auto:"Couldn't add an account",update:"Couldn't update"};
+const failText={snapshot:"Couldn't refresh",login:"Couldn't start sign-in",select:"Couldn't change the terminal account",remove:"Couldn't hide the account",add_auto:"Couldn't add an account",update:"Couldn't update",reorder:"Couldn't change the order"};
 const ICONS={
   refresh:'<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -285,7 +285,7 @@ function patch(container,blocks){
     index++;
   }
   old.forEach(n=>{n.remove();changed=true});
-  if(changed&&key&&!container.contains(active)){
+  if(changed&&key&&(!container.contains(active)||document.activeElement!==active)){  // a moved node loses focus too
     const scope=key.split(':')[0];
     (container.querySelector(`[data-key="${CSS.escape(key)}"]`)||container.querySelector(`[data-key^="${CSS.escape(scope)}:"]`))?.focus({preventScroll:true});
   }
@@ -293,6 +293,7 @@ function patch(container,blocks){
 }
 const LOADING='<div class="card loading" role="status"><span class="spinner" aria-hidden="true"></span>Loading usage…</div>';
 function render(moved,step){
+  if(drag?.moved){drag.renderLater=true;return}  // a re-render would replace the card being dragged
   const blocks=[];
   if(!lastData){const e=errors.setup||errors.action||errors.refresh;blocks.push(e?{key:'problem',html:problemCard(e)}:{key:'loading',html:LOADING})}
   const list=lastData?groups(lastData):[];
@@ -301,6 +302,7 @@ function render(moved,step){
   patch(cards,blocks);
   cards.classList.toggle('movable',movable);
   cards.querySelectorAll('.carousel .card-head').forEach(h=>{h.title=movable?'Drag to change the order (⌥↑ ⌥↓)':''});
+  cards.querySelectorAll('.carousel section.card').forEach(s=>{if(movable)s.setAttribute('aria-keyshortcuts','Alt+ArrowUp Alt+ArrowDown');else s.removeAttribute('aria-keyshortcuts')});
   const slide=moved&&cards.querySelector(`.carousel[data-provider="${CSS.escape(moved)}"] .slide`);
   if(slide)slide.classList.add(step<0?'from-left':'from-right');
   renderError();syncChrome();updateTimes();measure();
@@ -353,6 +355,7 @@ window.receiveSnapshot=function(encoded){
     if(pick){carouselPos[pick.provider]=pick.id;moved=pick.provider}
     pendingAdd=null;
   }
+  if(pendingOrder)data.cards=ordered(data.cards,pendingOrder);
   lastData=data;remember(data);
   // An action error goes on a later Refresh, or on a snapshot 15 s after it appeared (dismiss and the next action clear it too).
   errors.setup=null;errors.refresh=null;if(errors.action&&(errors.action.action==='snapshot'||Date.now()-errors.action.at>=15000))errors.action=null;
@@ -363,11 +366,13 @@ window.receiveError=function(encoded){
   let e;try{e=decode(encoded)}catch(error){e={}}
   const kind=['action','refresh','setup'].includes(e?.kind)?e.kind:'action',action=String(e?.action||''),message=String(e?.message||'Something went wrong.');
   if(action==='update'&&kind!=='refresh'&&updateInfo){updating=false;updateFailed=true;updateError=message;sourceInstall=false;updateHidden=false;clearTimeout(updateTimer);renderUpdate();return}
+  if(action==='reorder'){pendingOrder=null;reordersOut=0}
   errors[kind]={kind,action,message,at:Date.now()};
   render();
 };
 window.actionDone=function(encoded){
   let d;try{d=decode(encoded)}catch(error){return}
+  if(d.action==='reorder'&&--reordersOut<=0){reordersOut=0;if(!orderTimer)pendingOrder=null}  // saved: snapshots carry it now
   setBusy(busyKey(d.action,d.provider,d.account),false);
   render();
 };
@@ -466,11 +471,14 @@ document.addEventListener('click',event=>{
 // Service order: drag a card by its header, or press ⌥↑/⌥↓ inside it. The order is saved with the cards
 // and the menu bar follows it.
 function serviceOrder(){return [...document.querySelectorAll('#cards .carousel')].map(b=>b.dataset.provider)}
+// The page keeps showing the user's order (pendingOrder) until Usagi has saved it: snapshots from jobs that
+// started earlier still carry the old order. Orders are sent after a short pause, so only the last one runs.
+let pendingOrder=null,reordersOut=0,orderTimer=null;
+function ordered(cards,order){const rank=Object.fromEntries(order.map((p,i)=>[p,i]));return [...(cards||[])].sort((a,b)=>(rank[a.provider]??order.length)-(rank[b.provider]??order.length))}
 function applyOrder(order){
   if(!lastData||order.join()===serviceOrder().join())return;
-  const rank=Object.fromEntries(order.map((p,i)=>[p,i]));
-  lastData.cards=[...(lastData.cards||[])].sort((a,b)=>(rank[a.provider]??order.length)-(rank[b.provider]??order.length));
-  render();measure(true);send('reorder',{order:order.join(',')});
+  pendingOrder=order;lastData.cards=ordered(lastData.cards,order);render();
+  clearTimeout(orderTimer);orderTimer=setTimeout(()=>{orderTimer=null;reordersOut++;send('reorder',{order:pendingOrder.join(',')})},400);
   announce(`Order: ${order.map(p=>names[p]).join(', ')}`);
 }
 function moveService(p,step){
@@ -483,27 +491,34 @@ function clearDrop(){document.querySelectorAll('.drop-before,.drop-after').forEa
 $('cards').addEventListener('pointerdown',event=>{
   const head=event.target.closest('.card-head'),box=head?.closest('.carousel');
   if(!box||event.button!==0||event.target.closest('button')||serviceOrder().length<2)return;
-  drag={box,id:event.pointerId,y:event.clientY,moved:false,target:null};
+  drag={box,id:event.pointerId,y:event.clientY,scroll:$('cards').scrollTop,moved:false,target:null};
 });
 addEventListener('pointermove',event=>{
   if(!drag||event.pointerId!==drag.id)return;
-  const dy=event.clientY-drag.y;
+  if(!(event.buttons&1)){cancelDrag();return}  // the button was released somewhere we didn't hear about
+  const dy=event.clientY-drag.y+($('cards').scrollTop-drag.scroll);
   if(!drag.moved){if(Math.abs(dy)<5)return;drag.moved=true;drag.box.classList.add('dragging');try{drag.box.setPointerCapture(event.pointerId)}catch(error){}}
   event.preventDefault();
   drag.box.style.transform=`translateY(${dy}px)`;
-  const others=[...document.querySelectorAll('#cards .carousel')].filter(b=>b!==drag.box);
+  const p=drag.box.dataset.provider,others=[...document.querySelectorAll('#cards .carousel')].filter(b=>b.dataset.provider!==p);
   let before=others.find(b=>{const r=b.getBoundingClientRect();return event.clientY<r.top+r.height/2});
   clearDrop();
   if(before)before.classList.add('drop-before');else if(others.length)others[others.length-1].classList.add('drop-after');
   drag.target=before?before.dataset.provider:null;
 });
+function cancelDrag(){if(drag)endDrag({pointerId:drag.id,type:'pointercancel'})}
 function endDrag(event){
   if(!drag||event.pointerId!==drag.id)return;
   const d=drag;drag=null;clearDrop();d.box.classList.remove('dragging');d.box.style.transform='';
+  if(d.renderLater)render();
   if(!d.moved||event.type==='pointercancel')return;
-  const p=d.box.dataset.provider,order=serviceOrder().filter(x=>x!==p),at=d.target?order.indexOf(d.target):order.length;
+  const p=d.box.dataset.provider,order=serviceOrder().filter(x=>x!==p);
+  if(d.target===p)return;
+  const at=d.target?order.indexOf(d.target):order.length;
   order.splice(at<0?order.length:at,0,p);applyOrder(order);
 }
+addEventListener('blur',cancelDrag);document.addEventListener('visibilitychange',cancelDrag);
+$('cards').addEventListener('lostpointercapture',event=>{if(drag?.moved&&event.pointerId===drag.id)cancelDrag()});
 addEventListener('pointerup',endDrag);addEventListener('pointercancel',endDrag);
 document.addEventListener('keydown',event=>{
   if(modal){

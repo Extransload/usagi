@@ -114,7 +114,8 @@ equal(MenuBar.serviceChoices(services: 2, stored: nil).choices, [1, 2], "1…N f
 equal(MenuBar.serviceChoices(services: 2, stored: 0).checked, 2, "all checks the largest")
 equal(MenuBar.serviceChoices(services: 3, stored: 2).checked, 2, "a smaller limit")
 equal(MenuBar.serviceChoices(services: 2, stored: 5).checked, 2, "a limit above the services checks the largest")
-equal(MenuBar.serviceChoices(services: 0, stored: nil).choices, [1], "at least one choice")
+equal(MenuBar.serviceChoices(services: 0, stored: nil).choices, [1, 2], "before a snapshot: every known service")
+equal(MenuBar.serviceChoices(services: 0, stored: 1).checked, 1, "and the stored choice stays checked")
 equal(PageMessage.parse(["action": "reorder", "order": "codex,claude"]), .bridge(["reorder", "codex,claude"]), "reorder")
 equal(PageMessage.parse(["action": "reorder", "order": "codex"]), .bridge(["reorder", "codex"]), "reorder one")
 for bad in ["codex,codex", "gemini", "", "codex,", ",claude"] {
@@ -324,6 +325,18 @@ asked.finish(success: true, now: checkedAt)
 check(!asked.begin(now: checkedAt + 60), "waits 6 h")
 check(asked.begin(now: checkedAt + 60, force: true), "the user can check now")
 check(!asked.begin(now: checkedAt + 61, force: true), "but not twice at once")
+
+// Reordering: the newest order wins
+var orders = JobQueue()
+func reorder(_ order: String) -> Job {
+    Job(arguments: ["reorder", order], origin: .user, reports: [ActionDone(["reorder", order], ok: true)])
+}
+orders.add(reorder("codex,claude"))
+_ = orders.start()
+orders.add(reorder("claude,codex"))
+orders.add(reorder("codex,claude"))
+equal(orders.waiting.map(\.arguments), [["reorder", "codex,claude"]], "one waiting reorder: the newest, not merged into the running one")
+equal(orders.waiting.first?.reports.count, 2, "it carries the replaced job's actionDone too")
 
 // Also Use in Apps
 func pairs(_ list: [AppEnvironment.Change]) -> [String] { list.map { "\($0.name)=\($0.value ?? "<unset>")\($0.ours ? "" : " (undo)")" } }

@@ -118,7 +118,7 @@ enum MenuBar {
     /// "Menu Bar Shows" offers 1…N for the N services with cards; picking N stores 0 (all), so a service
     /// added later shows up too. Returns the choices and the one to check.
     static func serviceChoices(services: Int, stored: Int?) -> (choices: [Int], checked: Int) {
-        let count = max(1, services)
+        let count = services > 0 ? services : PageMessage.providers.count  // before the first snapshot: every service
         let limit = serviceLimit(stored: stored) ?? count
         return (Array(1...count), min(limit, count))
     }
@@ -225,6 +225,16 @@ struct JobQueue {
 
     @discardableResult
     mutating func add(_ job: Job) -> Bool {
+        if job.arguments.first == "reorder" {
+            // The newest order wins: it replaces a waiting reorder (taking over its actionDone reports) and is
+            // never merged into the running one, which may already be saving an older order.
+            var newest = job
+            if let index = waiting.firstIndex(where: { $0.arguments.first == "reorder" }) {
+                newest.reports = waiting.remove(at: index).reports + job.reports
+            }
+            insertUser(newest)
+            return true
+        }
         if var current = running, current.key == job.key {
             if job.origin == .user { current.origin = .user }
             current.reports += job.reports
