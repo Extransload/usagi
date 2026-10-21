@@ -109,7 +109,17 @@ equal(MenuBar.items(snapshot, limit: 1).more, 1, "one service left out")
 equal(MenuBar.items(snapshot, limit: nil).items.count, 2, "all services")
 equal(MenuBar.serviceLimit(stored: nil), 2, "default limit")
 equal(MenuBar.serviceLimit(stored: 1), 1, "stored limit")
-equal(MenuBar.serviceLimit(stored: 3), nil, "no third service yet: all")
+equal(MenuBar.serviceLimit(stored: 3), 3, "any number")
+equal(MenuBar.serviceChoices(services: 2, stored: nil).choices, [1, 2], "1…N for the services shown")
+equal(MenuBar.serviceChoices(services: 2, stored: 0).checked, 2, "all checks the largest")
+equal(MenuBar.serviceChoices(services: 3, stored: 2).checked, 2, "a smaller limit")
+equal(MenuBar.serviceChoices(services: 2, stored: 5).checked, 2, "a limit above the services checks the largest")
+equal(MenuBar.serviceChoices(services: 0, stored: nil).choices, [1], "at least one choice")
+equal(PageMessage.parse(["action": "reorder", "order": "codex,claude"]), .bridge(["reorder", "codex,claude"]), "reorder")
+equal(PageMessage.parse(["action": "reorder", "order": "codex"]), .bridge(["reorder", "codex"]), "reorder one")
+for bad in ["codex,codex", "gemini", "", "codex,", ",claude"] {
+    equal(PageMessage.parse(["action": "reorder", "order": bad]), nil, "reorder rejects \(bad)")
+}
 equal(MenuBar.serviceLimit(stored: 0), nil, "0 means all")
 equal(MenuBar.items(["cards": [], "providers": [:]]).items, [], "no cards")
 equal(MenuBar.items(["cards": [["provider": "claude", "id": "gone"]], "providers": [:]]).items,

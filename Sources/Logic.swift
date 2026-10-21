@@ -62,6 +62,11 @@ enum PageMessage: Equatable {
         case "add_auto":
             guard let provider else { return nil }
             return .bridge([action, provider])
+        case "reorder":  // "codex,claude": the services' new card order, each once
+            guard let order = fields["order"] as? String else { return nil }
+            let list = order.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+            guard !list.isEmpty, Set(list).count == list.count, list.allSatisfy(providers.contains) else { return nil }
+            return .bridge([action, order])
         default: return nil
         }
     }
@@ -104,10 +109,18 @@ enum MenuBar {
         return (Array(all.prefix(count)), max(0, all.count - count))
     }
 
-    /// The stored "Menu Bar Shows" choice: 0 (or anything unknown) means all services.
+    /// The stored "Menu Bar Shows" choice: a number of services, or 0 (or anything unknown) for all of them.
     static func serviceLimit(stored: Int?) -> Int? {
         guard let stored else { return defaultServiceLimit }
-        return (1...2).contains(stored) ? stored : nil
+        return stored > 0 ? stored : nil
+    }
+
+    /// "Menu Bar Shows" offers 1…N for the N services with cards; picking N stores 0 (all), so a service
+    /// added later shows up too. Returns the choices and the one to check.
+    static func serviceChoices(services: Int, stored: Int?) -> (choices: [Int], checked: Int) {
+        let count = max(1, services)
+        let limit = serviceLimit(stored: stored) ?? count
+        return (Array(1...count), min(limit, count))
     }
 
     /// The higher of the 5-hour and weekly windows, else the highest of any window.

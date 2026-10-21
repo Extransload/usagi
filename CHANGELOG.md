@@ -2,6 +2,16 @@
 
 All notable changes to Usagi. Each `## X.Y.Z` section is used as the release notes for that version: `release.sh` and the Release workflow stop if the section is missing.
 
+## 1.0.9
+
+### Added
+
+- Drag a service's card by its header to change the order of the cards, or press ⌥↑ / ⌥↓ inside a card. The menu bar shows the services in the same order.
+
+### Changed
+
+- **Menu Bar Shows** offers 1 up to the number of services you have instead of a fixed list. Choosing the largest number also shows services added later.
+
 ## 1.0.8
 
 ### Added

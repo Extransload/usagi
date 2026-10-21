@@ -48,6 +48,8 @@ h1{font-size:16px;letter-spacing:-.4px;line-height:1.1;margin:1px 0 0}
 .slide.from-right{animation:slide-right .18s ease}.slide.from-left{animation:slide-left .18s ease}
 @keyframes slide-right{from{opacity:.2;transform:translateX(16px)}}@keyframes slide-left{from{opacity:.2;transform:translateX(-16px)}}
 .card-head{display:flex;align-items:center;gap:8px;min-width:0}
+.movable .card-head{cursor:grab}.carousel.dragging{position:relative;z-index:2;cursor:grabbing}.carousel.dragging .card{box-shadow:0 14px 30px var(--shadow);opacity:.95}
+.carousel.drop-before::before,.carousel.drop-after::after{content:'';display:block;height:3px;border-radius:2px;background:var(--blue);margin:2px 8px 5px}
 .glyph{width:26px;height:26px;border-radius:7px;overflow:hidden;flex:none}.glyph img{width:100%;height:100%;object-fit:cover;display:block}
 .brand{font-size:14px;font-weight:720;margin:0;flex:none}
 .nav-group{display:flex;flex:none;align-items:center;gap:3px}
@@ -293,9 +295,12 @@ const LOADING='<div class="card loading" role="status"><span class="spinner" ari
 function render(moved,step){
   const blocks=[];
   if(!lastData){const e=errors.setup||errors.action||errors.refresh;blocks.push(e?{key:'problem',html:problemCard(e)}:{key:'loading',html:LOADING})}
-  else{const list=groups(lastData);if(!list.length)blocks.push({key:'empty',html:emptyCard()});for(const g of list)blocks.push({key:g.source,html:carousel(g)})}
-  const cards=$('cards');
+  const list=lastData?groups(lastData):[];
+  if(lastData){if(!list.length)blocks.push({key:'empty',html:emptyCard()});for(const g of list)blocks.push({key:g.source,html:carousel(g)})}
+  const cards=$('cards'),movable=list.length>1;
   patch(cards,blocks);
+  cards.classList.toggle('movable',movable);
+  cards.querySelectorAll('.carousel .card-head').forEach(h=>{h.title=movable?'Drag to change the order (⌥↑ ⌥↓)':''});
   const slide=moved&&cards.querySelector(`.carousel[data-provider="${CSS.escape(moved)}"] .slide`);
   if(slide)slide.classList.add(step<0?'from-left':'from-right');
   renderError();syncChrome();updateTimes();measure();
@@ -458,6 +463,48 @@ document.addEventListener('click',event=>{
     case 'dismiss-error':errors[b.dataset.kind]=null;render();break;
   }
 });
+// Service order: drag a card by its header, or press ⌥↑/⌥↓ inside it. The order is saved with the cards
+// and the menu bar follows it.
+function serviceOrder(){return [...document.querySelectorAll('#cards .carousel')].map(b=>b.dataset.provider)}
+function applyOrder(order){
+  if(!lastData||order.join()===serviceOrder().join())return;
+  const rank=Object.fromEntries(order.map((p,i)=>[p,i]));
+  lastData.cards=[...(lastData.cards||[])].sort((a,b)=>(rank[a.provider]??order.length)-(rank[b.provider]??order.length));
+  render();measure(true);send('reorder',{order:order.join(',')});
+  announce(`Order: ${order.map(p=>names[p]).join(', ')}`);
+}
+function moveService(p,step){
+  const order=serviceOrder(),i=order.indexOf(p),j=i+step;
+  if(i<0||j<0||j>=order.length)return;
+  order.splice(i,1);order.splice(j,0,p);applyOrder(order);
+}
+let drag=null;
+function clearDrop(){document.querySelectorAll('.drop-before,.drop-after').forEach(b=>b.classList.remove('drop-before','drop-after'))}
+$('cards').addEventListener('pointerdown',event=>{
+  const head=event.target.closest('.card-head'),box=head?.closest('.carousel');
+  if(!box||event.button!==0||event.target.closest('button')||serviceOrder().length<2)return;
+  drag={box,id:event.pointerId,y:event.clientY,moved:false,target:null};
+});
+addEventListener('pointermove',event=>{
+  if(!drag||event.pointerId!==drag.id)return;
+  const dy=event.clientY-drag.y;
+  if(!drag.moved){if(Math.abs(dy)<5)return;drag.moved=true;drag.box.classList.add('dragging');try{drag.box.setPointerCapture(event.pointerId)}catch(error){}}
+  event.preventDefault();
+  drag.box.style.transform=`translateY(${dy}px)`;
+  const others=[...document.querySelectorAll('#cards .carousel')].filter(b=>b!==drag.box);
+  let before=others.find(b=>{const r=b.getBoundingClientRect();return event.clientY<r.top+r.height/2});
+  clearDrop();
+  if(before)before.classList.add('drop-before');else if(others.length)others[others.length-1].classList.add('drop-after');
+  drag.target=before?before.dataset.provider:null;
+});
+function endDrag(event){
+  if(!drag||event.pointerId!==drag.id)return;
+  const d=drag;drag=null;clearDrop();d.box.classList.remove('dragging');d.box.style.transform='';
+  if(!d.moved||event.type==='pointercancel')return;
+  const p=d.box.dataset.provider,order=serviceOrder().filter(x=>x!==p),at=d.target?order.indexOf(d.target):order.length;
+  order.splice(at<0?order.length:at,0,p);applyOrder(order);
+}
+addEventListener('pointerup',endDrag);addEventListener('pointercancel',endDrag);
 document.addEventListener('keydown',event=>{
   if(modal){
     if(event.key==='Escape'){event.preventDefault();pendingHide=null;closeModal()}
@@ -467,6 +514,11 @@ document.addEventListener('keydown',event=>{
       if(event.shiftKey&&(document.activeElement===first||!modal.contains(document.activeElement))){event.preventDefault();last.focus()}
       else if(!event.shiftKey&&(document.activeElement===last||!modal.contains(document.activeElement))){event.preventDefault();first.focus()}
     }
+    return;
+  }
+  if((event.key==='ArrowUp'||event.key==='ArrowDown')&&event.altKey&&!event.metaKey&&!event.ctrlKey){
+    const box=event.target.closest?.('.carousel');
+    if(box){event.preventDefault();moveService(box.dataset.provider,event.key==='ArrowUp'?-1:1)}
     return;
   }
   if((event.key==='ArrowLeft'||event.key==='ArrowRight')&&!event.metaKey&&!event.altKey&&!event.ctrlKey){

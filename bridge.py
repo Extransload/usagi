@@ -606,6 +606,17 @@ def remove_card(provider, name, checks=None):
     save_cards([item for item in cards if item != card])
 
 
+def reorder_cards(order, checks=None):
+    """Puts the services' cards in `order` ("codex,claude"), keeping each service's accounts in their order.
+    The card order is the order of the cards in the menu and of the services in the menu bar."""
+    providers = order.split(",")
+    if sorted(providers) != sorted(set(providers)) or not set(providers) <= set(accounts.PROVIDERS):
+        raise accounts.AccountError("Unknown or repeated service")
+    cards = visible_cards(checks)
+    rank = {provider: index for index, provider in enumerate(providers)}
+    save_cards(sorted(cards, key=lambda card: rank.get(card["provider"], len(rank))))  # sorted() is stable
+
+
 def validate_login(provider, name):
     if provider not in accounts.PROVIDERS or name not in accounts.profiles(provider):
         raise accounts.AccountError("Unknown provider or account")
@@ -973,6 +984,10 @@ def main(argv):
     elif action == "remove" and len(argv) == 3:
         checks = {}
         remove_card(argv[1], argv[2], checks)
+        print_json(snapshot(checks))
+    elif action == "reorder" and len(argv) == 2:
+        checks = {}
+        reorder_cards(argv[1], checks)
         print_json(snapshot(checks))
     elif action == "login" and len(argv) == 3:
         login(argv[1], argv[2])

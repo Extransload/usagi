@@ -299,6 +299,22 @@ for line in sys.stdin:
 '''
 
 
+class ReorderTests(IsolatedTest):
+    def test_reorder_moves_services_and_keeps_account_order(self):
+        for name in ("account-2", "account-3"):
+            bridge.accounts.add(name, "codex")
+        cards = [{"provider": "claude", "id": "default"}, {"provider": "codex", "id": "account-3"},
+                 {"provider": "codex", "id": "account-2"}]
+        bridge.save_cards(cards)
+        bridge.reorder_cards("codex,claude")
+        self.assertEqual(bridge.visible_cards(), [cards[1], cards[2], cards[0]])
+        bridge.reorder_cards("claude")  # services left out keep their place after the named ones
+        self.assertEqual(bridge.visible_cards(), [cards[0], cards[1], cards[2]])
+        for bad in ("claude,claude", "gemini,claude", ""):
+            with self.assertRaises(bridge.accounts.AccountError):
+                bridge.reorder_cards(bad)
+
+
 class CodexLiveTests(IsolatedTest):
     def live(self, account, limits='{"primary": {"usedPercent": 40, "windowDurationMins": 300}}'):
         self.fake_cli("codex", FAKE_LIVE_CODEX % (account, limits))

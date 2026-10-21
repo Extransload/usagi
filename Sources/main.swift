@@ -137,11 +137,6 @@ enum LaunchEnvironment {
         let menu = NSMenu()
         menu.addItem(withTitle: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "r").target = self
         menu.addItem(withTitle: "Check for Updates", action: #selector(checkForUpdatesNow), keyEquivalent: "").target = self
-        for (title, value) in [("1 Service", 1), ("2 Services", 2), ("All Services", 0)] {
-            let item = servicesMenu.addItem(withTitle: title, action: #selector(setMenuBarServices(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = value
-        }
         menu.addItem(withTitle: "Menu Bar Shows", action: nil, keyEquivalent: "").submenu = servicesMenu
         alsoUseInAppsItem.target = self
         menu.addItem(alsoUseInAppsItem)
@@ -226,9 +221,24 @@ enum LaunchEnvironment {
         MenuBar.serviceLimit(stored: UserDefaults.standard.object(forKey: MenuBar.serviceLimitKey) as? Int)
     }
 
+    /// The largest choice is stored as 0 (all), so a service added later shows up without changing this.
     @objc private func setMenuBarServices(_ sender: NSMenuItem) {
-        UserDefaults.standard.set(sender.tag, forKey: MenuBar.serviceLimitKey)
+        UserDefaults.standard.set(sender.tag == servicesMenu.items.count ? 0 : sender.tag, forKey: MenuBar.serviceLimitKey)
         updateStatus()
+    }
+
+    private func buildServicesMenu() {
+        let services = controller.snapshot.map { MenuBar.items($0, limit: nil).items.count } ?? 0
+        let stored = UserDefaults.standard.object(forKey: MenuBar.serviceLimitKey) as? Int
+        let (choices, checked) = MenuBar.serviceChoices(services: services, stored: stored)
+        servicesMenu.removeAllItems()
+        for count in choices {
+            let item = servicesMenu.addItem(withTitle: count == 1 ? "1 Service" : "\(count) Services",
+                                            action: #selector(setMenuBarServices(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = count
+            item.state = count == checked ? .on : .off
+        }
     }
 
     private var alsoUseInApps: Bool { UserDefaults.standard.bool(forKey: AppEnvironment.enabledKey) }
@@ -257,8 +267,7 @@ enum LaunchEnvironment {
 
     private func showMenu() {
         alsoUseInAppsItem.state = alsoUseInApps ? .on : .off
-        let chosen = serviceLimit ?? 0
-        servicesMenu.items.forEach { $0.state = $0.tag == chosen ? .on : .off }
+        buildServicesMenu()
         if popover.isShown { popover.performClose(nil) }
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
