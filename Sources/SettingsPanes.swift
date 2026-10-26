@@ -13,7 +13,8 @@ final class GeneralPane: SettingsPage {
     private var interval = NSSegmentedControl()
     private let recorder = ShortcutRecorder()
     private let clear = NSButton(title: "Clear", target: nil, action: nil)
-    private let taken = SettingsForm.note("Another app uses this shortcut. Choose another one.")
+    private let taken = SettingsForm.note("Another app uses that shortcut. Choose another one.")
+    private let needsModifier = SettingsForm.note("A shortcut needs ⌘, ⌥ or ⌃.")
 
     init(preferences: Preferences, actions: SettingsActions) {
         self.preferences = preferences
@@ -33,7 +34,12 @@ final class GeneralPane: SettingsPage {
         clear.controlSize = .small
         interval = SettingsForm.segments(["1 min", "2 min", "5 min", "15 min"], selected: 2, target: self, action: #selector(chooseInterval))
         recorder.changed = { [weak self] in self?.preferences.shortcut = $0 }
-        recorder.recordingChanged = { [weak self] in self?.actions.setShortcutPaused($0) }
+        recorder.recordingChanged = { [weak self] recording in
+            self?.needsModifier.isHidden = true
+            self?.actions.setShortcutPaused(recording)
+        }
+        recorder.refused = { [weak self] in self?.needsModifier.isHidden = false }
+        needsModifier.isHidden = true
         let shortcut = NSStackView(views: [recorder, clear])
         shortcut.spacing = 6
         let approvalRow = NSStackView(views: [approval, approvalButton])
@@ -53,8 +59,13 @@ final class GeneralPane: SettingsPage {
                 SettingsForm.row("Open Usagi", detail: "Opens the account cards from any app.", control: shortcut),
             ]),
             taken,
+            needsModifier,
         ])
         refresh()
+    }
+
+    override func closing() {
+        recorder.cancel()
     }
 
     override func refresh() {

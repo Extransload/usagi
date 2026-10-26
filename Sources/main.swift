@@ -134,10 +134,7 @@ enum LaunchEnvironment {
     private let preferences = Preferences()
     private let notifier = LimitNotifier()
     private var alertedSnapshot: Date?  // the snapshot the limit alerts last looked at
-    private let hotKey = HotKey()
-    private var registeredShortcut: Shortcut?
-    /// The system refused the shortcut in Settings (another app holds it); Settings says so.
-    private(set) var shortcutFailed = false
+    private lazy var openShortcut = OpenShortcut(preferences: preferences) { [weak self] in self?.togglePopover() }
     private var settingsWindow: SettingsWindow?
     private var updateInfo: [String: String]?  // the last update check's answer, for Settings > About
     private var menuOpen = false
@@ -200,7 +197,7 @@ enum LaunchEnvironment {
         controller.loadViewIfNeeded()
         controller.setAlsoUseInApps(alsoUseInApps)
         updateStatus()
-        applyShortcut()
+        openShortcut.apply()
         refreshIcons()
         checkForUpdate()
     }
@@ -225,18 +222,6 @@ enum LaunchEnvironment {
         }
     }
 
-    private func applyShortcut() {
-        let shortcut = preferences.shortcut
-        guard shortcut != registeredShortcut else { return }
-        registeredShortcut = shortcut
-        shortcutFailed = !hotKey.register(shortcut) { [weak self] in self?.togglePopover() }
-    }
-
-    /// While Settings records a new shortcut, the old one is off, so pressing it doesn't open the menu.
-    private func pauseShortcut(_ paused: Bool) {
-        registeredShortcut = nil
-        if paused { hotKey.unregister() } else { applyShortcut() }
-    }
 
     /// The page's full height, fitted to the space below the menu bar on the screen the status item is on
     /// (refitted before every open, so a smaller screen or a moved Dock never gets a too-tall popover).
@@ -278,8 +263,9 @@ enum LaunchEnvironment {
 
     private func preferencesChanged() {
         controller.hiddenInterval = preferences.refreshInterval
-        applyShortcut()
+        openShortcut.apply()
         updateStatus()
+        settingsWindow?.refresh()  // after the shortcut's outcome is known
     }
 
     @objc private func openSettings() {
@@ -313,8 +299,8 @@ enum LaunchEnvironment {
             openUpdate: { [weak self] in self?.checkForUpdatesNow() },
             alsoUseInApps: { [weak self] in self?.alsoUseInApps ?? false },
             setAlsoUseInApps: { [weak self] enabled in if self?.alsoUseInApps != enabled { self?.toggleAlsoUseInApps() } },
-            shortcutFailed: { [weak self] in self?.shortcutFailed ?? false },
-            setShortcutPaused: { [weak self] paused in self?.pauseShortcut(paused) })
+            shortcutFailed: { [weak self] in self?.openShortcut.failed ?? false },
+            setShortcutPaused: { [weak self] paused in self?.openShortcut.pause(paused) })
     }
 
     private var alsoUseInApps: Bool { UserDefaults.standard.bool(forKey: AppEnvironment.enabledKey) }

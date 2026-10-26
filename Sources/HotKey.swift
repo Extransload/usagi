@@ -47,6 +47,8 @@ final class ShortcutRecorder: NSButton {
     var changed: (Shortcut?) -> Void = { _ in }
     /// Lets the owner pause the hot key while a new one is typed, so pressing the old one doesn't open the menu.
     var recordingChanged: (Bool) -> Void = { _ in }
+    /// A shortcut without ⌘, ⌥ or ⌃ was typed (and refused).
+    var refused: () -> Void = {}
     private var recording = false {
         didSet {
             guard recording != oldValue else { return }
@@ -68,6 +70,24 @@ final class ShortcutRecorder: NSButton {
         target = self
         action = #selector(toggle)
         updateTitle()
+    }
+
+    /// Stops recording, keeping the shortcut it had.
+    func cancel() {
+        recording = false
+    }
+
+    private var observers: [NSObjectProtocol] = []
+
+    // Leaving the window (another app, or closing it) ends a recording, so the hot key doesn't stay paused.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers = [NSWindow.didResignKeyNotification, NSWindow.willCloseNotification].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.cancel() }
+            }
+        }
     }
 
     override var acceptsFirstResponder: Bool { true }
@@ -102,6 +122,7 @@ final class ShortcutRecorder: NSButton {
         let candidate = Shortcut(keyCode: UInt32(event.keyCode), modifiers: flags.rawValue, key: Self.keyName(event))
         guard candidate.isAllowed else {
             NSSound.beep()
+            refused()
             return
         }
         recording = false
@@ -123,5 +144,53 @@ final class ShortcutRecorder: NSButton {
     /// The key's name without any modifier applied (⇧⌘2 is "2", not "@").
     private static func keyName(_ event: NSEvent) -> String {
         names[Int(event.keyCode)] ?? event.characters(byApplyingModifiers: [])?.uppercased() ?? "?"
+    }
+}
+
+/// The Open Usagi shortcut stored in Preferences, kept registered as a HotKey.
+@MainActor final class OpenShortcut {
+    private let preferences: Preferences
+    private let action: @MainActor () -> Void
+    private let hotKey = HotKey()
+    /// The shortcut that works (stored and, unless paused, registered), and whether it is registered now.
+    private var kept: Shortcut?
+    private var live = false
+    private var paused = false
+    private var started = false
+    /// The system refused a shortcut (another app holds it); Settings says so.
+    private(set) var failed = false
+
+    init(preferences: Preferences, action: @escaping @MainActor () -> Void) {
+        self.preferences = preferences
+        self.action = action
+    }
+
+    /// Registers the stored shortcut when it changed. A shortcut the system refuses isn't kept: the one before goes back
+    /// into Preferences and is registered again. (At launch the stored one stays stored, in case the other app lets go.)
+    func apply() {
+        guard !paused else { return }
+        let wanted = preferences.shortcut
+        if wanted == kept && (live || wanted == nil) { return }
+        if hotKey.register(wanted, action: action) {
+            kept = wanted
+            live = wanted != nil
+            failed = false
+        } else {
+            failed = true
+            live = kept.map { hotKey.register($0, action: action) } ?? false
+            if started { preferences.shortcut = kept }
+        }
+        started = true
+    }
+
+    /// While Settings records a new shortcut, the old one is off, so pressing it doesn't open the menu.
+    func pause(_ pause: Bool) {
+        paused = pause
+        if pause {
+            hotKey.unregister()
+            live = false
+        } else {
+            apply()
+        }
     }
 }
