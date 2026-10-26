@@ -411,6 +411,85 @@ enum SVGPath {
     }
 }
 
+enum LimitAlerts {
+    struct Reading: Equatable {
+        var used: Double
+        var resetsAt: Double?
+        var reset: Bool
+    }
+
+    struct Record: Codable, Equatable {
+        var used: Double
+        var resetsAt: Double?
+        var seen: Double
+    }
+
+    enum Alert: Equatable { case crossed(Int), usedUp, reset }
+
+    struct Options: Equatable {
+        var thresholds: [Int]
+        var usedUp: Bool
+        var reset: Bool
+    }
+
+    static let defaultThresholds = [80, 95], thresholdChoices = [50, 60, 70, 80, 90, 95]
+    static let keepFor: TimeInterval = 35 * 86400, newCycleSlack = 60.0
+    static let stateKey = "notifyState", thresholdsKey = "notifyThresholds", usedUpKey = "notifyUsedUp", resetKey = "notifyReset"
+
+    /// Each service's menu bar account, every limit it reports, keyed "<provider>|<account id>|<window key>". Services
+    /// switched off in the menu bar are included.
+    static func readings(_ snapshot: [String: Any]) -> [String: Reading] {
+        var readings: [String: Reading] = [:]
+        for provider in MenuBar.order(snapshot) {
+            guard let account = MenuBar.menuBarAccount(snapshot, provider: provider), let id = account["id"] as? String else { continue }
+            for case let (window, value as [String: Any]) in account["windows"] as? [String: Any] ?? [:] {
+                guard let used = value["used_percent"] as? Double, used.isFinite else { continue }
+                readings["\(provider)|\(id)|\(window)"] = Reading(used: used, resetsAt: value["resets_at"] as? Double,
+                                                                   reset: value["reset"] as? Bool == true)
+            }
+        }
+        return readings
+    }
+
+    /// What one limit's new reading calls for, and what to remember. Alerts only on crossings seen while running (a
+    /// limit seen for the first time is just recorded), at most one per reading: the highest step crossed, else a reset.
+    static func evaluate(_ previous: Record?, _ reading: Reading, options: Options, now: Date) -> (alert: Alert?, record: Record) {
+        let seen = now.timeIntervalSince1970
+        guard let previous else { return (nil, Record(used: reading.used, resetsAt: reading.resetsAt, seen: seen)) }
+        if reading.reset {  // Claude's "Reset" until Claude Code reports the new cycle
+            return (previous.used > 0 && options.reset ? .reset : nil, Record(used: 0, resetsAt: nil, seen: seen))
+        }
+        var newCycle = false
+        if let before = previous.resetsAt, let after = reading.resetsAt { newCycle = after > before + newCycleSlack }
+        let base = newCycle ? 0 : previous.used
+        let steps = options.thresholds.filter { $0 > 0 } + (options.usedUp ? [100] : [])
+        let alert: Alert?
+        if let step = steps.filter({ base < Double($0) && Double($0) <= reading.used }).max() {
+            alert = step == 100 && options.usedUp ? .usedUp : .crossed(step)
+        } else {
+            alert = newCycle && previous.used > 0 && options.reset ? .reset : nil
+        }
+        // An older source never moves the cycle back.
+        let resetsAt = newCycle ? reading.resetsAt : [previous.resetsAt, reading.resetsAt].compactMap { $0 }.max()
+        return (alert, Record(used: reading.used, resetsAt: resetsAt, seen: seen))
+    }
+
+    static func prune(_ records: [String: Record], now: Date) -> [String: Record] {
+        records.filter { now.timeIntervalSince1970 - $0.value.seen <= keepFor }
+    }
+
+    static func text(_ alert: Alert, key: String) -> (title: String, body: String) {
+        let parts = key.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        let name = parts.first.map { MenuBar.names[$0] ?? $0 } ?? "Usagi"
+        let limit = "\(name) \(MenuBar.limitLabel(parts.last ?? "")) limit"
+        switch alert {
+        case .crossed(let step): return ("\(limit) at \(step)%", "\(step)% of this limit is used.")
+        case .usedUp: return ("\(limit) used up", "This limit is used up until it resets.")
+        case .reset: return ("\(limit) reset", "This limit is available again.")
+        }
+    }
+}
+
 enum Cadence {
     static let shown: TimeInterval = 60, hidden: TimeInterval = 300, onOpen: TimeInterval = 30
 

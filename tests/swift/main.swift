@@ -223,6 +223,49 @@ equal(MenuBarStyle.paint(highlighted: false, stale: false, increaseContrast: tru
 equal(MenuBarStyle.paint(highlighted: false, stale: true, increaseContrast: false), .dimmed, "out of date: dimmed")
 equal(MenuBarStyle.paint(highlighted: true, stale: true, increaseContrast: true), .dimmed, "out of date wins")
 
+// Limit alerts
+let on = LimitAlerts.Options(thresholds: [80, 95], usedUp: true, reset: true)
+func rec(_ used: Double, _ resetsAt: Double?) -> LimitAlerts.Record { .init(used: used, resetsAt: resetsAt, seen: 0) }
+func read(_ used: Double, _ resetsAt: Double?, reset: Bool = false) -> LimitAlerts.Reading {
+    .init(used: used, resetsAt: resetsAt, reset: reset)
+}
+equal(LimitAlerts.evaluate(nil, read(97, 1000), options: on, now: t0).alert, nil, "first sight is silent")
+equal(LimitAlerts.evaluate(nil, read(97, 1000), options: on, now: t0).record, .init(used: 97, resetsAt: 1000, seen: t0.timeIntervalSince1970),
+      "but recorded")
+equal(LimitAlerts.evaluate(rec(70, 1000), read(85, 1000), options: on, now: t0).alert, .crossed(80), "crossing 80")
+equal(LimitAlerts.evaluate(rec(70, 1000), read(100, 1000), options: on, now: t0).alert, .usedUp, "several steps: highest only")
+equal(LimitAlerts.evaluate(rec(70, 1000), read(100, 1000), options: .init(thresholds: [80, 95], usedUp: false, reset: true), now: t0).alert,
+      .crossed(95), "used up off")
+equal(LimitAlerts.evaluate(rec(70, 1000), read(85, 1000), options: .init(thresholds: [0, 95], usedUp: true, reset: true), now: t0).alert,
+      nil, "a threshold set to Off")
+equal(LimitAlerts.evaluate(rec(85, 1000), read(88, 1000), options: on, now: t0).alert, nil, "no repeat")
+equal(LimitAlerts.evaluate(rec(60, 1000), read(5, 20000), options: on, now: t0).alert, .reset, "new cycle")
+equal(LimitAlerts.evaluate(rec(60, 1000), read(5, 20000), options: .init(thresholds: [80, 95], usedUp: true, reset: false), now: t0).alert,
+      nil, "reset alerts off")
+equal(LimitAlerts.evaluate(rec(60, 1000), read(5, 1030), options: on, now: t0).alert, nil, "within 60 s is the same cycle")
+equal(LimitAlerts.evaluate(rec(0, 1000), read(0, 20000), options: on, now: t0).alert, nil, "unused limit: no reset alert")
+equal(LimitAlerts.evaluate(rec(60, 1000), read(85, 20000), options: on, now: t0).alert, .crossed(80), "crossing beats reset")
+equal(LimitAlerts.evaluate(rec(40, 1000), read(0, nil, reset: true), options: on, now: t0).alert, .reset, "Claude's reset flag")
+equal(LimitAlerts.evaluate(rec(40, 1000), read(0, nil, reset: true), options: on, now: t0).record.used, 0, "flag records an empty limit")
+equal(LimitAlerts.evaluate(rec(0, nil), read(0, nil, reset: true), options: on, now: t0).alert, nil, "flag seen twice")
+equal(LimitAlerts.evaluate(rec(0, nil), read(30, 9000), options: on, now: t0).alert, nil, "first reading after the flag: no reset again")
+equal(LimitAlerts.evaluate(rec(50, 2000), read(50, 1000), options: on, now: t0).record.resetsAt, 2000, "older source keeps the cycle")
+equal(LimitAlerts.prune(["a": .init(used: 1, resetsAt: nil, seen: t0.timeIntervalSince1970 - 36 * 86400),
+                         "b": .init(used: 1, resetsAt: nil, seen: t0.timeIntervalSince1970 - 34 * 86400)], now: t0).keys.sorted(),
+      ["b"], "prune after 35 days")
+equal(Set(LimitAlerts.readings(activeSecond).keys), ["claude|default|5h", "codex|account-2|5h"], "menu bar accounts only")
+let flagged: [String: Any] = ["cards": [["provider": "claude", "id": "default"]],
+                              "providers": ["claude": ["accounts": [["id": "default", "windows": [
+                                  "5h": ["used_percent": 0.0, "resets_at": NSNull(), "reset": true],
+                                  "7d": ["used_percent": 12.5, "resets_at": 5000.0], "bad": ["used_percent": "x"]]]]]]]
+equal(LimitAlerts.readings(flagged), ["claude|default|5h": read(0, nil, reset: true), "claude|default|7d": read(12.5, 5000)],
+      "reset flag and resets_at read, non-numbers skipped")
+equal(LimitAlerts.text(.crossed(80), key: "claude|default|5h").title, "Claude 5-hour limit at 80%", "title")
+equal(LimitAlerts.text(.crossed(80), key: "claude|default|5h").body, "80% of this limit is used.", "body")
+equal(LimitAlerts.text(.usedUp, key: "codex|account-2|7d").title, "Codex Weekly limit used up", "used up title")
+equal(LimitAlerts.text(.reset, key: "codex|default|30d").title, "Codex 30-day limit reset", "reset title")
+equal(LimitAlerts.text(.reset, key: "codex|default|30d").body, "This limit is available again.", "reset body")
+
 // Logo paths
 typealias Step = SVGPath.Step
 equal(SVGPath.steps("M1 2L3 4H5V6C1 2 3 4 5 6Z"),

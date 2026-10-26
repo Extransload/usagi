@@ -96,19 +96,19 @@ import Foundation
     /// The two "Warn when a limit passes" values; 0 is Off.
     var thresholds: [Int] {
         get {
-            let stored = defaults.array(forKey: "notifyThresholds") as? [Int] ?? []
-            return stored.count == 2 ? stored : [80, 95]
+            let stored = defaults.array(forKey: LimitAlerts.thresholdsKey) as? [Int] ?? []
+            return stored.count == 2 ? stored : LimitAlerts.defaultThresholds
         }
-        set { store(newValue == [80, 95] ? nil : newValue, "notifyThresholds") }
+        set { store(newValue == LimitAlerts.defaultThresholds ? nil : newValue, LimitAlerts.thresholdsKey) }
     }
 
     var notifyUsedUp: Bool {
-        get { defaults.object(forKey: "notifyUsedUp") as? Bool ?? true }
-        set { store(newValue ? nil : false, "notifyUsedUp") }
+        get { defaults.object(forKey: LimitAlerts.usedUpKey) as? Bool ?? true }
+        set { store(newValue ? nil : false, LimitAlerts.usedUpKey) }
     }
 
     var notifyReset: Bool {
-        get { defaults.object(forKey: "notifyReset") as? Bool ?? true }
-        set { store(newValue ? nil : false, "notifyReset") }
+        get { defaults.object(forKey: LimitAlerts.resetKey) as? Bool ?? true }
+        set { store(newValue ? nil : false, LimitAlerts.resetKey) }
     }
 }
