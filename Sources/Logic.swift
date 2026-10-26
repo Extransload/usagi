@@ -108,20 +108,76 @@ enum MenuBar {
         limit > 0 ? Set(order.dropFirst(limit)) : []
     }
 
-    /// One item per service turned on, in card order: the Active account's usage when its card is shown,
-    /// else the service's first card.
-    static func items(_ snapshot: [String: Any], hidden: Set<String> = []) -> [MenuBarItem] {
+    static let autoLimit = "auto", autoLimitTitle = "Higher of 5-hour and weekly"
+
+    /// The account the menu bar uses for a service: the Active account when its card is shown, else the first
+    /// shown card in the page's order (the accounts list is sorted). The snapshot's account entry, or nil.
+    static func menuBarAccount(_ snapshot: [String: Any], provider: String) -> [String: Any]? {
         let cards = snapshot["cards"] as? [[String: Any]] ?? []
-        let providers = snapshot["providers"] as? [String: Any] ?? [:]
-        return order(snapshot).filter { !hidden.contains($0) }.map { provider -> MenuBarItem in
-            let info = providers[provider] as? [String: Any] ?? [:]
-            let shown = cards.filter { $0["provider"] as? String == provider }.compactMap { $0["id"] as? String }
-            let accounts = info["accounts"] as? [[String: Any]] ?? []
-            // The Active account, else the first shown card in the page's order (the accounts list is sorted).
-            let id = (info["active"] as? String).flatMap { shown.contains($0) ? $0 : nil }
-                ?? accounts.compactMap { $0["id"] as? String }.first(where: shown.contains) ?? shown.first
-            let windows = accounts.first { $0["id"] as? String == id }?["windows"] as? [String: Any] ?? [:]
-            return MenuBarItem(provider: provider, percent: usedPercent(windows).flatMap(clampPercent))
+        let info = (snapshot["providers"] as? [String: Any])?[provider] as? [String: Any] ?? [:]
+        let shown = cards.filter { $0["provider"] as? String == provider }.compactMap { $0["id"] as? String }
+        let accounts = info["accounts"] as? [[String: Any]] ?? []
+        let id = (info["active"] as? String).flatMap { shown.contains($0) ? $0 : nil }
+            ?? accounts.compactMap { $0["id"] as? String }.first(where: shown.contains) ?? shown.first
+        return accounts.first { $0["id"] as? String == id }
+    }
+
+    /// A limit's name, as the cards show it (windowLabel in index.html): "5-hour", "Weekly", "30-day", "Fable weekly".
+    static func limitLabel(_ key: String) -> String {
+        if key == "5h" { return "5-hour" }
+        if key == "7d" { return "Weekly" }
+        let count = key.dropLast()
+        if let unit = key.last, unit == "d" || unit == "h", !count.isEmpty, count.allSatisfy({ ("0"..."9").contains($0) }),
+           let number = Int(count) {
+            return "\(number)-\(unit == "d" ? "day" : "hour")"
+        }
+        let words = key.split(whereSeparator: { $0 == "_" || $0 == "-" || $0.isWhitespace })
+        return words.map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ") + " weekly"
+    }
+
+    /// A service's "Limit shown" choices: automatic, then the limits its menu bar account reports (5-hour, weekly,
+    /// then the rest by key), then a stored choice that isn't reported now.
+    static func limitOptions(_ snapshot: [String: Any]?, provider: String, stored: String) -> [LimitOption] {
+        let windows = snapshot.flatMap { menuBarAccount($0, provider: provider)?["windows"] as? [String: Any] } ?? [:]
+        func rank(_ key: String) -> Int { key == "5h" ? 0 : key == "7d" ? 1 : 2 }
+        let keys = windows.filter { $0.value is [String: Any] }.keys.sorted { (rank($0), $0) < (rank($1), $1) }
+        var options = [LimitOption(key: autoLimit, title: autoLimitTitle)] + keys.map { LimitOption(key: $0, title: limitLabel($0)) }
+        if stored != autoLimit && !keys.contains(stored) {
+            options.append(LimitOption(key: stored, title: limitLabel(stored) + " (not reported now)"))
+        }
+        return options
+    }
+
+    /// The usage the menu bar shows for a limit choice; nil (a dash) when the chosen limit isn't reported.
+    static func percent(_ windows: [String: Any], limit: String) -> Int? {
+        guard limit != autoLimit else { return usedPercent(windows).flatMap(clampPercent) }
+        return ((windows[limit] as? [String: Any])?["used_percent"] as? Double).flatMap(clampPercent)
+    }
+
+    /// "Show percentages as Remaining" turns usage into what is left, never below 0.
+    static func shownPercent(_ percent: Int?, remaining: Bool) -> Int? {
+        percent.map { remaining ? max(0, 100 - $0) : $0 }
+    }
+
+    /// A service's accounts in card order, named as the cards name them, the Active one marked.
+    static func accountNames(_ snapshot: [String: Any]?, provider: String) -> [String] {
+        guard let snapshot else { return [] }
+        let cards = snapshot["cards"] as? [[String: Any]] ?? []
+        let info = (snapshot["providers"] as? [String: Any])?[provider] as? [String: Any] ?? [:]
+        let accounts = info["accounts"] as? [[String: Any]] ?? []
+        return cards.filter { $0["provider"] as? String == provider }.compactMap { $0["id"] as? String }.map { id in
+            let email = accounts.first { $0["id"] as? String == id }?["email"] as? String
+            let slot = id == "default" ? "Account 1" : id.hasPrefix("account-") ? "Account " + id.dropFirst(8) : id
+            let name = email.flatMap { $0.isEmpty ? nil : $0 } ?? slot
+            return info["active"] as? String == id ? name + " (Active)" : name
+        }
+    }
+
+    /// One item per service turned on, in card order, from its menu bar account and its chosen limit.
+    static func items(_ snapshot: [String: Any], hidden: Set<String> = [], limits: [String: String] = [:]) -> [MenuBarItem] {
+        order(snapshot).filter { !hidden.contains($0) }.map { provider in
+            let windows = menuBarAccount(snapshot, provider: provider)?["windows"] as? [String: Any] ?? [:]
+            return MenuBarItem(provider: provider, percent: percent(windows, limit: limits[provider] ?? autoLimit))
         }
     }
 
@@ -145,19 +201,27 @@ enum MenuBar {
         return String(repeating: figureSpace, count: max(0, 3 - digits.count)) + digits + "%"
     }
 
-    static func accessibilityLabel(_ items: [MenuBarItem], stale: Bool) -> String {
-        let parts = items.map { "\(names[$0.provider] ?? $0.provider) \($0.percent.map { "\($0)%" } ?? "no data")" }
+    /// `items` carry the percentages as shown (see shownPercent).
+    static func accessibilityLabel(_ items: [MenuBarItem], stale: Bool, remaining: Bool = false) -> String {
+        let parts = items.map { "\(names[$0.provider] ?? $0.provider) \($0.percent.map { "\($0)%\(remaining ? " left" : "")" } ?? "no data")" }
         return "Usagi" + (parts.isEmpty ? "" : ": " + parts.joined(separator: ", ")) + (stale ? " (not up to date)" : "")
     }
 
-    static func isStale(lastSuccess: Date?, failed: Bool, now: Date) -> Bool {
-        failed || lastSuccess.map { now.timeIntervalSince($0) > staleAfter } ?? false
+    /// Out of date after 15 minutes, or 5 minutes past the refresh interval when that is longer.
+    static func isStale(lastSuccess: Date?, failed: Bool, now: Date, refreshInterval: TimeInterval = Cadence.hidden) -> Bool {
+        failed || lastSuccess.map { now.timeIntervalSince($0) > max(staleAfter, refreshInterval + 5 * 60) } ?? false
     }
 
     static func tooltip(updated: String?, error: String?) -> String {
         (["Usagi", updated.map { "Updated \($0)" } ?? "Not updated yet"] + [error].compactMap { $0 })
             .joined(separator: "\n")
     }
+}
+
+/// One choice in a service's "Limit shown" list: "auto" or a window key, with its title.
+struct LimitOption: Equatable {
+    var key: String
+    var title: String
 }
 
 /// An sRGB color, each component 0…1.
@@ -210,6 +274,17 @@ enum MenuBarStyle {
     static let minimumContrast = 2.0
 
     static func colorKey(_ provider: String) -> String { "menuBarColor.\(provider)" }
+
+    static let textSizeKey = "menuBarTextSize", showsLogosKey = "menuBarShowsLogos", showsRemainingKey = "menuBarShowsRemaining"
+
+    enum TextSize: String, CaseIterable {
+        case small, regular, large
+
+        var fontSize: Double { self == .small ? 10 : self == .regular ? 11 : 13 }
+        var glyphSize: Double { self == .small ? 12 : self == .regular ? 14 : 16 }
+    }
+
+    static func limitKey(_ provider: String) -> String { "menuBarLimit.\(provider)" }
 
     /// The stored "#RRGGBB", else the service's default.
     static func color(_ provider: String, stored: String?) -> RGB {
@@ -339,7 +414,15 @@ enum SVGPath {
 enum Cadence {
     static let shown: TimeInterval = 60, hidden: TimeInterval = 300, onOpen: TimeInterval = 30
 
-    static func delay(since last: Date?, shown: Bool, now: Date) -> TimeInterval {
+    /// Settings > General offers these refresh intervals for while the menu is closed.
+    static let hiddenChoices: [TimeInterval] = [60, 120, 300, 900]
+    static let intervalKey = "refreshInterval"
+
+    static func hiddenInterval(stored: Int?) -> TimeInterval {
+        stored.map(TimeInterval.init).flatMap { hiddenChoices.contains($0) ? $0 : nil } ?? hidden
+    }
+
+    static func delay(since last: Date?, shown: Bool, now: Date, hidden: TimeInterval = Cadence.hidden) -> TimeInterval {
         let interval = shown ? Self.shown : hidden
         guard let last else { return interval }
         return min(interval, max(1, interval - now.timeIntervalSince(last)))

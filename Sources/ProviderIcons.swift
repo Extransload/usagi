@@ -48,10 +48,9 @@ enum Network {
 /// The menu bar's logos (Glyphs), filled with a color resolved each time they are drawn, so a dynamic color follows
 /// the menu bar's light or dark appearance.
 enum MenuBarGlyphs {
-    static let size: CGFloat = 14
     private static let steps = Glyphs.paths.compactMapValues(SVGPath.steps)
 
-    static func image(_ provider: String, color: NSColor) -> NSImage? {
+    static func image(_ provider: String, color: NSColor, size: CGFloat = 14) -> NSImage? {
         guard let steps = steps[provider] else { return nil }
         let image = NSImage(size: NSSize(width: size, height: size), flipped: true) { rect in
             let path = NSBezierPath()
@@ -73,8 +72,12 @@ enum MenuBarGlyphs {
         return image
     }
 
-    /// Each service's logo and percentage, painted in its color, plain or dimmed.
-    static func label(_ items: [MenuBarItem], paint: MenuBarStyle.Paint, color: (String) -> RGB) -> NSAttributedString {
+    /// Each service's logo (unless `logos` is off) and percentage, painted in its color, plain or dimmed. The items carry
+    /// the percentages as shown.
+    static func label(_ items: [MenuBarItem], paint: MenuBarStyle.Paint, color: (String) -> RGB, size: MenuBarStyle.TextSize,
+                      logos: Bool) -> NSAttributedString {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: size.fontSize, weight: .semibold)
+        let glyphSize = CGFloat(size.glyphSize)
         let label = NSMutableAttributedString()
         for (index, item) in items.enumerated() {
             if index > 0 { label.append(NSAttributedString(string: "   ")) }
@@ -84,17 +87,17 @@ enum MenuBarGlyphs {
             case .plain: ink = .labelColor
             case .dimmed: ink = .secondaryLabelColor
             }
-            if let glyph = image(item.provider, color: ink) {
+            if logos, let glyph = image(item.provider, color: ink, size: glyphSize) {
                 let attachment = NSTextAttachment()
                 attachment.image = glyph
-                attachment.bounds = NSRect(x: 0, y: -3, width: size, height: size)
+                // Centred on the digits' cap height.
+                attachment.bounds = NSRect(x: 0, y: ((font.capHeight - glyphSize) / 2).rounded(), width: glyphSize, height: glyphSize)
                 label.append(NSAttributedString(attachment: attachment))
                 label.append(NSAttributedString(string: " "))
             }
             label.append(NSAttributedString(string: MenuBar.percentText(item.percent), attributes: [.foregroundColor: ink]))
         }
-        label.addAttribute(.font, value: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
-                           range: NSRange(location: 0, length: label.length))
+        label.addAttribute(.font, value: font, range: NSRange(location: 0, length: label.length))
         return label
     }
 

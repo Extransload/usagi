@@ -1,58 +1,19 @@
 import AppKit
 
-/// Settings kept in UserDefaults: each service's color and whether the menu bar shows it. `changed` redraws the menu bar.
-@MainActor final class MenuBarSettings {
-    var changed: () -> Void = {}
-    private let defaults = UserDefaults.standard
-
-    func color(_ provider: String) -> RGB {
-        MenuBarStyle.color(provider, stored: defaults.string(forKey: MenuBarStyle.colorKey(provider)))
-    }
-
-    /// nil, or the default itself, puts back the default (so a later change of default applies).
-    func setColor(_ color: RGB?, for provider: String) {
-        let key = MenuBarStyle.colorKey(provider)
-        let hex = color.flatMap { $0 == MenuBarStyle.color(provider, stored: nil) ? nil : $0.hex }
-        guard hex != defaults.string(forKey: key) else { return }
-        if let hex { defaults.set(hex, forKey: key) } else { defaults.removeObject(forKey: key) }
-        changed()
-    }
-
-    var hidden: Set<String> { Set(defaults.stringArray(forKey: MenuBar.hiddenKey) ?? []) }
-
-    func setShown(_ shown: Bool, _ provider: String) {
-        var hidden = self.hidden
-        guard hidden.contains(provider) == shown else { return }
-        if shown { hidden.remove(provider) } else { hidden.insert(provider) }
-        defaults.set(hidden.sorted(), forKey: MenuBar.hiddenKey)
-        changed()
-    }
-
-    /// The old "Menu Bar Shows" count becomes switches once there are cards to order the services, then is forgotten.
-    /// Services without cards yet come last, so they stay off as they would have been left out before.
-    func migrate(_ snapshot: [String: Any]) {
-        guard let limit = defaults.object(forKey: MenuBar.serviceLimitKey) as? Int, !MenuBar.order(snapshot).isEmpty else { return }
-        if defaults.object(forKey: MenuBar.hiddenKey) == nil {
-            defaults.set(MenuBar.hidden(migrating: limit, order: MenuBar.services(snapshot)).sorted(), forKey: MenuBar.hiddenKey)
-        }
-        defaults.removeObject(forKey: MenuBar.serviceLimitKey)
-    }
-}
-
 /// The Settings window, opened from the status item's right-click menu: one section per service, in card order.
 @MainActor final class SettingsWindow: NSObject, NSWindowDelegate {
     static let width: CGFloat = 380
     private var window: NSWindow?
     private var sections: [ServiceSection] = []
 
-    func show(_ settings: MenuBarSettings, services: [String]) {
+    func show(_ settings: Preferences, services: [String]) {
         if window == nil || sections.map(\.provider) != services { build(settings, services: services) }
         sections.forEach { $0.refresh() }
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
     }
 
-    private func build(_ settings: MenuBarSettings, services: [String]) {
+    private func build(_ settings: Preferences, services: [String]) {
         sections.forEach { $0.stopPicking() }  // the color panel must not keep driving a well that is going away
         sections = services.map { ServiceSection(provider: $0, settings: settings) }
         sections.forEach { $0.resized = { [weak self] in self?.fit() } }
@@ -103,7 +64,7 @@ import AppKit
     let provider: String
     let view: NSView
     var resized: () -> Void = {}
-    private let settings: MenuBarSettings
+    private let settings: Preferences
     private let shown = NSSwitch()
     private let hex = NSTextField(string: "")
     private let well = NSColorWell(style: .default)
@@ -112,7 +73,7 @@ import AppKit
 
     private var standard: RGB { MenuBarStyle.color(provider, stored: nil) }
 
-    init(provider: String, settings: MenuBarSettings) {
+    init(provider: String, settings: Preferences) {
         self.provider = provider
         self.settings = settings
         let title = NSTextField(labelWithString: MenuBar.names[provider] ?? provider)

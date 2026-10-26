@@ -19,6 +19,10 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
     private(set) var snapshot: [String: Any]?
     private(set) var lastSuccess: Date?
     private(set) var lastError: String?
+    /// How often to refresh while the popover is closed (Settings > General).
+    var hiddenInterval: TimeInterval = Cadence.hidden {
+        didSet { if hiddenInterval != oldValue { scheduleRefresh() } }
+    }
     private var lastRefresh: Date?
     private var snapshotData: Data?
     private var errorData: Data?
@@ -262,12 +266,12 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 
     // MARK: Timers
 
-    /// Every 60 s while the popover is shown, every 300 s while hidden, nothing while the screens sleep.
+    /// Every 60 s while the popover is shown, every `hiddenInterval` while hidden, nothing while the screens sleep.
     private func scheduleRefresh() {
         refreshTimer?.invalidate()
         refreshTimer = nil
         guard !asleep else { return }
-        let timer = Timer(timeInterval: Cadence.delay(since: lastRefresh, shown: shown, now: Date()), repeats: false) { [weak self] _ in
+        let timer = Timer(timeInterval: Cadence.delay(since: lastRefresh, shown: shown, now: Date(), hidden: hiddenInterval), repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshTick() }
         }
         timer.tolerance = shown ? 5 : 30

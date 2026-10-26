@@ -131,7 +131,7 @@ enum LaunchEnvironment {
     private let alsoUseInAppsItem = NSMenuItem(title: "Also Use in Apps", action: #selector(toggleAlsoUseInApps), keyEquivalent: "")
     private var syncedSnapshot: Date?, syncedOff = false  // the snapshot last synced, to skip repeats
     private var requestedHeight: Double = 540
-    private let settings = MenuBarSettings()
+    private let preferences = Preferences()
     private let settingsWindow = SettingsWindow()
     private var menuOpen = false
 
@@ -167,6 +167,7 @@ enum LaunchEnvironment {
         statusItem.button?.action = #selector(statusItemClicked)
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         controller = UsageController()
+        controller.hiddenInterval = preferences.refreshInterval
         controller.onStatus = { [weak self] in self?.updateStatus() }
         controller.onCheckUpdates = { [weak self] in self?.checkForUpdate(force: true) }
         controller.onResize = { [weak self] height in
@@ -179,7 +180,9 @@ enum LaunchEnvironment {
                                                           object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateStatus() }
         }
-        settings.changed = { [weak self] in self?.updateStatus() }
+        NotificationCenter.default.addObserver(forName: Preferences.didChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.preferencesChanged() }
+        }
         popover = NSPopover()
         popover.contentViewController = controller
         popover.contentSize = NSSize(width: 380, height: 540)
@@ -244,9 +247,14 @@ enum LaunchEnvironment {
         return menu
     }
 
+    private func preferencesChanged() {
+        controller.hiddenInterval = preferences.refreshInterval
+        updateStatus()
+    }
+
     @objc private func openSettings() {
         if popover.isShown { popover.performClose(nil) }
-        settingsWindow.show(settings, services: MenuBar.services(controller.snapshot))
+        settingsWindow.show(preferences, services: MenuBar.services(controller.snapshot))
     }
 
     private var alsoUseInApps: Bool { UserDefaults.standard.bool(forKey: AppEnvironment.enabledKey) }
@@ -329,12 +337,15 @@ enum LaunchEnvironment {
     /// for VoiceOver) when the last refresh failed or the last success is older than 15 minutes.
     private func updateStatus() {
         syncAppEnvironment()
-        if let snapshot = controller.snapshot { settings.migrate(snapshot) }
+        if let snapshot = controller.snapshot { preferences.migrate(snapshot) }
         guard let button = statusItem.button else { return }
-        let stale = MenuBar.isStale(lastSuccess: controller.lastSuccess, failed: controller.lastError != nil, now: Date())
+        let stale = MenuBar.isStale(lastSuccess: controller.lastSuccess, failed: controller.lastError != nil, now: Date(),
+                                    refreshInterval: preferences.refreshInterval)
         button.toolTip = MenuBar.tooltip(updated: controller.lastSuccess.map(Self.timeText), error: controller.lastError)
-        let items = controller.snapshot.map { MenuBar.items($0, hidden: settings.hidden) } ?? []
-        button.setAccessibilityLabel(MenuBar.accessibilityLabel(items, stale: stale))
+        let remaining = preferences.showsRemaining
+        let items = (controller.snapshot.map { MenuBar.items($0, hidden: preferences.hidden, limits: preferences.limits) } ?? [])
+            .map { MenuBarItem(provider: $0.provider, percent: MenuBar.shownPercent($0.percent, remaining: remaining)) }
+        button.setAccessibilityLabel(MenuBar.accessibilityLabel(items, stale: stale, remaining: remaining))
         guard !items.isEmpty else {
             button.attributedTitle = NSAttributedString(string: "")
             button.image = Self.rabbit
@@ -345,7 +356,8 @@ enum LaunchEnvironment {
                                        increaseContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
         button.appearsDisabled = false
         button.image = nil
-        button.attributedTitle = MenuBarGlyphs.label(items, paint: paint, color: settings.color)
+        button.attributedTitle = MenuBarGlyphs.label(items, paint: paint, color: preferences.color, size: preferences.textSize,
+                                                     logos: preferences.showsLogos)
     }
 
     private static func timeText(_ date: Date) -> String {
