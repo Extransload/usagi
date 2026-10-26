@@ -284,8 +284,24 @@ enum LaunchEnvironment {
 
     @objc private func openSettings() {
         if popover.isShown { popover.performClose(nil) }
-        if settingsWindow == nil { settingsWindow = SettingsWindow(preferences: preferences, actions: settingsActions()) }
+        if settingsWindow == nil {
+            let window = SettingsWindow(preferences: preferences, actions: settingsActions())
+            window.makePage = { [weak self] pane in self?.settingsPage(pane) }
+            settingsWindow = window
+        }
         settingsWindow?.show()
+    }
+
+    private func settingsPage(_ pane: SettingsPane) -> SettingsPage? {
+        switch pane {
+        case .general: return GeneralPane(preferences: preferences, actions: settingsActions())
+        case .menuBar: return MenuBarPane(preferences: preferences, actions: settingsActions())
+        case .notifications:
+            return NotificationsPane(preferences: preferences, status: { [weak self] done in self?.notifier.status(done) },
+                                     request: { [weak self] done in self?.notifier.requestAuthorization(then: done) })
+        case .about: return AboutPane(version: Updates.current, actions: settingsActions())
+        case .service: return nil
+        }
     }
 
     private func settingsActions() -> SettingsActions {

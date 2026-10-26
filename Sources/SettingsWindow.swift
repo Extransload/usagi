@@ -36,7 +36,7 @@ class SettingsPage: NSViewController {
     private var pages: [SettingsPane: SettingsPage] = [:]
     private var current: SettingsPane?
     /// Makes the page for a pane that has no page of its own yet.
-    var makePage: (SettingsPane) -> SettingsPage? = { _ in nil }
+    var makePage: @MainActor (SettingsPane) -> SettingsPage? = { _ in nil }
 
     init(preferences: Preferences, actions: SettingsActions) {
         self.preferences = preferences

@@ -494,6 +494,11 @@ check(!asked.begin(now: checkedAt + 60), "waits 6 h")
 check(asked.begin(now: checkedAt + 60, force: true), "the user can check now")
 check(!asked.begin(now: checkedAt + 61, force: true), "but not twice at once")
 
+equal(UpdateStatus.line(nil), "Not checked yet", "never checked")
+equal(UpdateStatus.line(["current": "1.0.11", "failed": "true"]), "Couldn't check for updates", "failed")
+equal(UpdateStatus.line(["current": "1.0.11", "latest": "1.0.11", "checked_at": "1800000000"]), "Up to date", "current")
+equal(UpdateStatus.line(["current": "1.0.11", "version": "1.0.12", "checked_at": "1800000000"]), "Usagi 1.0.12 is available", "newer")
+
 // Reordering: the newest order wins
 var orders = JobQueue()
 func reorder(_ order: String) -> Job { Job(arguments: ["reorder", order], origin: .user) }  // as the page's messages are queued

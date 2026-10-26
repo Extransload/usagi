@@ -111,11 +111,13 @@ import AppKit
         return field
     }
 
-    /// "4 minutes ago", in English like the rest of Usagi.
+    /// "4 minutes ago" or "now", in English like the rest of Usagi; never in the future.
     static func relative(_ date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.locale = Locale(identifier: "en_US")
-        return formatter.localizedString(for: date, relativeTo: Date())
+        formatter.dateTimeStyle = .named
+        let now = Date()
+        return formatter.localizedString(for: min(date, now), relativeTo: now)
     }
 
     /// A segmented control choosing one of `titles`.

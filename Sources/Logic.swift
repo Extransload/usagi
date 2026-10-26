@@ -751,6 +751,14 @@ enum UpdateStatus {
         return ["current": current, "checked_at": String(Int(now.timeIntervalSince1970)),
                 Version.newer(latest, than: current) ? "version" : "latest": latest]
     }
+
+    /// Settings > About's one-line summary of `info`.
+    static func line(_ info: [String: String]?) -> String {
+        guard let info else { return "Not checked yet" }
+        if info["failed"] != nil { return "Couldn't check for updates" }
+        if let version = info["version"] { return "Usagi \(version) is available" }
+        return "Up to date"
+    }
 }
 
 /// Reloads after the page's WebContent process crashed: at most 3 a minute, then none until the popover opens.
