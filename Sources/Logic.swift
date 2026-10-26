@@ -516,6 +516,35 @@ struct Shortcut: Codable, Equatable {
     }
 }
 
+/// A page of the Settings window; `id` is how the last one opened is remembered.
+enum SettingsPane: Hashable {
+    case general, menuBar, notifications, about, service(String)
+
+    static let storeKey = "settingsPane"
+
+    var id: String {
+        switch self {
+        case .general: return "general"
+        case .menuBar: return "menuBar"
+        case .notifications: return "notifications"
+        case .about: return "about"
+        case .service(let provider): return "service:\(provider)"
+        }
+    }
+
+    init?(id: String) {
+        switch id {
+        case "general": self = .general
+        case "menuBar": self = .menuBar
+        case "notifications": self = .notifications
+        case "about": self = .about
+        default:
+            guard id.hasPrefix("service:"), id.count > 8 else { return nil }
+            self = .service(String(id.dropFirst(8)))
+        }
+    }
+}
+
 enum Cadence {
     static let shown: TimeInterval = 60, hidden: TimeInterval = 300, onOpen: TimeInterval = 30
 

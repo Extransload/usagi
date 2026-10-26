@@ -279,6 +279,15 @@ equal(Shortcut(keyCode: 32, modifiers: Shortcut.control | Shortcut.shift | Short
 equal(Shortcut(keyCode: 32, modifiers: Shortcut.option, key: "U").carbonModifiers, 0x800, "carbon option")
 equal(try? JSONDecoder().decode(Shortcut.self, from: JSONEncoder().encode(cmdOptU)), cmdOptU, "stored as JSON")
 
+// Settings pages
+for pane in [SettingsPane.general, .menuBar, .notifications, .about, .service("codex")] {
+    equal(SettingsPane(id: pane.id), pane, "pane id round trip \(pane.id)")
+}
+equal(SettingsPane.service("claude").id, "service:claude", "service pane id")
+equal(SettingsPane(id: "service:claude"), .service("claude"), "service pane")
+equal(SettingsPane(id: "nonsense"), nil, "unknown pane")
+equal(SettingsPane(id: "service:"), nil, "service without a name")
+
 // Logo paths
 typealias Step = SVGPath.Step
 equal(SVGPath.steps("M1 2L3 4H5V6C1 2 3 4 5 6Z"),

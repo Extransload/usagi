@@ -97,6 +97,12 @@ import Foundation
         set { store(newValue.flatMap { try? JSONEncoder().encode($0) }, Shortcut.storeKey) }
     }
 
+    /// The Settings page opened last. Not a setting: changing it announces nothing.
+    var settingsPane: SettingsPane {
+        get { defaults.string(forKey: SettingsPane.storeKey).flatMap(SettingsPane.init(id:)) ?? .general }
+        set { defaults.set(newValue.id, forKey: SettingsPane.storeKey) }
+    }
+
     // MARK: Notifications
 
     /// The two "Warn when a limit passes" values; 0 is Off.

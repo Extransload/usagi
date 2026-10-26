@@ -138,7 +138,8 @@ enum LaunchEnvironment {
     private var registeredShortcut: Shortcut?
     /// The system refused the shortcut in Settings (another app holds it); Settings says so.
     private(set) var shortcutFailed = false
-    private let settingsWindow = SettingsWindow()
+    private var settingsWindow: SettingsWindow?
+    private var updateInfo: [String: String]?  // the last update check's answer, for Settings > About
     private var menuOpen = false
 
     private lazy var menu: NSMenu = {
@@ -283,7 +284,21 @@ enum LaunchEnvironment {
 
     @objc private func openSettings() {
         if popover.isShown { popover.performClose(nil) }
-        settingsWindow.show(preferences, services: MenuBar.services(controller.snapshot))
+        if settingsWindow == nil { settingsWindow = SettingsWindow(preferences: preferences, actions: settingsActions()) }
+        settingsWindow?.show()
+    }
+
+    private func settingsActions() -> SettingsActions {
+        SettingsActions(
+            snapshot: { [weak self] in self?.controller.snapshot },
+            lastSuccess: { [weak self] in self?.controller.lastSuccess },
+            update: { [weak self] in self?.updateInfo },
+            checkForUpdates: { [weak self] in self?.checkForUpdate(force: true) },
+            openUpdate: { [weak self] in self?.checkForUpdatesNow() },
+            alsoUseInApps: { [weak self] in self?.alsoUseInApps ?? false },
+            setAlsoUseInApps: { [weak self] enabled in if self?.alsoUseInApps != enabled { self?.toggleAlsoUseInApps() } },
+            shortcutFailed: { [weak self] in self?.shortcutFailed ?? false },
+            setShortcutPaused: { [weak self] paused in self?.pauseShortcut(paused) })
     }
 
     private var alsoUseInApps: Bool { UserDefaults.standard.bool(forKey: AppEnvironment.enabledKey) }
@@ -358,7 +373,12 @@ enum LaunchEnvironment {
     }
 
     private func checkForUpdate(force: Bool = false) {
-        Updates.check(force: force) { [weak self] info in self?.controller.setUpdate(info) }
+        Updates.check(force: force) { [weak self] info in
+            guard let self else { return }
+            controller.setUpdate(info)
+            if info["failed"] == nil || updateInfo == nil { updateInfo = info }  // as the page keeps it
+            settingsWindow?.refresh()
+        }
     }
 
     /// One item per service turned on in Settings (its Active account), or the rabbit when none is shown. Each service's logo
@@ -371,6 +391,7 @@ enum LaunchEnvironment {
             if controller.lastSuccess != alertedSnapshot {
                 alertedSnapshot = controller.lastSuccess
                 notifier.check(snapshot, preferences: preferences)
+                settingsWindow?.refresh()
             }
         }
         guard let button = statusItem.button else { return }
