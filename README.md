@@ -15,7 +15,8 @@ Needs macOS 14 or later and the Claude Code or Codex CLI ([requirements](#requir
 
 <img src="docs/demo.gif" width="380" alt="Usagi menu: Claude and Codex cards with 5-hour, weekly and model limits, a free-reset and a credit line, flipping to a second Codex account, then dragging the Codex card above Claude while the cards slide into place">
 
-- A rabbit icon or your usage percentages appear in the menu bar: one per service (Claude, Codex), for the account marked **Active** (or the service's first card when that account is hidden). Click it to open the account cards; right-click it for **Refresh Now**, **Check for Updates**, **Menu Bar Shows** (how many services before a "+N", from 1 up to the services you have; the largest also covers services added later), **Also Use in Apps** and **Quit Usagi**.
+- Your usage percentages appear in the menu bar, each after its service's logo: one per service (Claude, Codex), for the account marked **Active** (or the service's first card when that account is hidden). With no service to show, a rabbit icon appears instead. Click it to open the account cards; right-click it for **Refresh Now**, **Check for Updates**, **Also Use in Apps**, **Settings…** and **Quit Usagi**.
+- **Settings…** has a section per service: **Show in menu bar** turns the service on or off there, and **Color** sets the color of its logo and percentage, with a hex field (`#RRGGBB`) and a color well. **Reset** puts back the default shown next to it. A color too faint against a light or dark menu bar is drawn in black or white there, and Settings says so. While a menu is open, the numbers are out of date, or **Increase contrast** is on in System Settings, the menu bar shows no colors.
 - To start Usagi when you log in, add it under **System Settings > General > Login Items**.
 - Usagi is not signed or notarized by Apple. So that it opens right away, the Homebrew install removes the macOS quarantine flag. That skips Apple's check, so install it only if you trust this repository. From 1.0.3 on, every release zip is built by GitHub Actions and can be checked with `gh attestation verify` ([SECURITY.md](SECURITY.md)).
 
@@ -70,7 +71,7 @@ Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the C
 - **Claude**: the usage cache Claude Code keeps in `~/.claude.json` (`~/.claude-<name>/.claude.json` for extra accounts). Only percentages and reset times are read. Claude Code refreshes that cache itself, so a reading can be hours old; Usagi marks a 5-hour reading older than 30 minutes, or any other reading older than 3 hours, as possibly out of date. Dollar credits listed in the same cache, such as the cloud-session credit for Max and Pro, are shown with what's left and when they expire. Sign-in state comes from `claude auth status`.
 - **Codex**: Usagi asks the Codex CLI's official app-server (`codex app-server`) for the account and its limits. Limits are named by the period Codex reports (Team: 5-hour and weekly, Free: 30-day, and so on). Free limit resets Codex granted you are listed on the card with their expiry dates.
 - Usagi never reads or copies sign-in tokens. Sign-in uses `claude auth login` and the Codex app-server's own sign-in.
-- **Icons**: card and menu bar icons come from the Claude and ChatGPT apps when they are installed. If the Claude app isn't installed, Usagi downloads Claude's icon from claude.ai (PNG only, at most 1 MB, again after 30 days) and keeps it in `~/.config/usagi/icons`. Without either, Usagi shows plain C and X badges.
+- **Icons**: the menu bar draws the logos itself. Card icons come from the Claude and ChatGPT apps when they are installed. If the Claude app isn't installed, Usagi downloads Claude's icon from claude.ai (PNG only, at most 1 MB, again after 30 days) and keeps it in `~/.config/usagi/icons`. Without either, Usagi shows plain C and X badges.
 - **Network**: apart from the CLIs it runs, Usagi itself only contacts `api.github.com` for the update check and claude.ai for that icon.
 - **Files Usagi writes**, all in `~/.config/usagi`: the card list (`cards.json`), the account new terminals use (`state/`), sign-in markers and the last sign-in error (`logins/`), where it found the CLIs (`cli-paths.json`, `cli-paths.lock`), the Claude icon (`icons/`), and the last update's output (`update.log`, `update.lock`). New profiles are the folders `~/.claude-<name>` and `~/.codex-<name>`, which link to your shared settings, skills and hooks in `~/.claude` and `~/.codex`. A `settings.json` that carries credentials (an API key, `apiKeyHelper`, or Bedrock, Vertex or AWS settings), or that Usagi can't read, is not linked, so each account signs in on its own.
 - With the same account, the Claude apps, claude.ai and Claude Code share limits. Codex limits can also be shared with other Codex use on the same ChatGPT account.
@@ -170,5 +171,7 @@ If a step fails, fix the cause and run the same command again; finished steps ar
 ## License
 
 [MIT](LICENSE)
+
+The menu bar logos come from [CodexBar](https://github.com/steipete/CodexBar) (MIT, © 2026 Peter Steinberger); its notice is in `Sources/Glyphs.swift`.
 
 Claude is a trademark of Anthropic. Codex and ChatGPT are trademarks of OpenAI. Usagi is an unofficial app and is not affiliated with either company.

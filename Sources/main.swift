@@ -93,7 +93,7 @@ enum LaunchEnvironment {
     }
 }
 
-@MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var controller: UsageController!
@@ -128,20 +128,23 @@ enum LaunchEnvironment {
         return image
     }()
 
-    private let servicesMenu = NSMenu()
     private let alsoUseInAppsItem = NSMenuItem(title: "Also Use in Apps", action: #selector(toggleAlsoUseInApps), keyEquivalent: "")
     private var syncedSnapshot: Date?, syncedOff = false  // the snapshot last synced, to skip repeats
     private var requestedHeight: Double = 540
+    private let settings = MenuBarSettings()
+    private let settingsWindow = SettingsWindow()
+    private var menuOpen = false
 
     private lazy var menu: NSMenu = {
         let menu = NSMenu()
         menu.addItem(withTitle: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "r").target = self
         menu.addItem(withTitle: "Check for Updates", action: #selector(checkForUpdatesNow), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Menu Bar Shows", action: nil, keyEquivalent: "").submenu = servicesMenu
         alsoUseInAppsItem.target = self
         menu.addItem(alsoUseInAppsItem)
+        menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Usagi", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q").target = NSApp
+        menu.delegate = self
         return menu
     }()
 
@@ -157,6 +160,7 @@ enum LaunchEnvironment {
             }
         }
         NSApp.setActivationPolicy(.accessory)
+        NSApp.mainMenu = Self.shortcutMenu()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = Self.rabbit
         statusItem.button?.target = self
@@ -171,6 +175,11 @@ enum LaunchEnvironment {
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil,
                                                queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.fitPopover() } }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+                                                          object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateStatus() }
+        }
+        settings.changed = { [weak self] in self?.updateStatus() }
         popover = NSPopover()
         popover.contentViewController = controller
         popover.contentSize = NSSize(width: 380, height: 540)
@@ -216,29 +225,28 @@ enum LaunchEnvironment {
         controller.view.window?.makeKey()
     }
 
-    /// How many services the menu bar shows before "+N" (UserDefaults; 0 = all).
-    private var serviceLimit: Int? {
-        MenuBar.serviceLimit(stored: UserDefaults.standard.object(forKey: MenuBar.serviceLimitKey) as? Int)
+    /// Never shown (Usagi has no menu bar of its own), but text fields only get ⌘X, ⌘C, ⌘V, ⌘A and ⌘Z, and Settings ⌘W
+    /// and ⌘Q, through a main menu's shortcuts.
+    private static func shortcutMenu() -> NSMenu {
+        let app = NSMenu(title: "Usagi")
+        app.addItem(withTitle: "Quit Usagi", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Usagi", action: nil, keyEquivalent: "").submenu = app
+        menu.addItem(withTitle: "Edit", action: nil, keyEquivalent: "").submenu = edit
+        return menu
     }
 
-    /// The largest choice is stored as 0 (all), so a service added later shows up without changing this.
-    @objc private func setMenuBarServices(_ sender: NSMenuItem) {
-        UserDefaults.standard.set(sender.tag == servicesMenu.items.count ? 0 : sender.tag, forKey: MenuBar.serviceLimitKey)
-        updateStatus()
-    }
-
-    private func buildServicesMenu() {
-        let services = controller.snapshot.map { MenuBar.items($0, limit: nil).items.count } ?? 0
-        let stored = UserDefaults.standard.object(forKey: MenuBar.serviceLimitKey) as? Int
-        let (choices, checked) = MenuBar.serviceChoices(services: services, stored: stored)
-        servicesMenu.removeAllItems()
-        for count in choices {
-            let item = servicesMenu.addItem(withTitle: count == 1 ? "1 Service" : "\(count) Services",
-                                            action: #selector(setMenuBarServices(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = count
-            item.state = count == checked ? .on : .off
-        }
+    @objc private func openSettings() {
+        if popover.isShown { popover.performClose(nil) }
+        settingsWindow.show(settings, services: MenuBar.services(controller.snapshot))
     }
 
     private var alsoUseInApps: Bool { UserDefaults.standard.bool(forKey: AppEnvironment.enabledKey) }
@@ -267,7 +275,6 @@ enum LaunchEnvironment {
 
     private func showMenu() {
         alsoUseInAppsItem.state = alsoUseInApps ? .on : .off
-        buildServicesMenu()
         if popover.isShown { popover.performClose(nil) }
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
@@ -289,59 +296,56 @@ enum LaunchEnvironment {
     func popoverDidShow(_ notification: Notification) {
         statusItem.button?.highlight(true)
         controller.popoverOpened()
+        updateStatus()
     }
 
     func popoverDidClose(_ notification: Notification) {
         statusItem.button?.highlight(false)
         controller.popoverClosed()
+        updateStatus()
         if NSApp.isActive && NSApp.keyWindow == nil && statusItem.menu == nil { NSApp.deactivate() }
     }
 
+    func menuWillOpen(_ menu: NSMenu) {
+        menuOpen = true
+        updateStatus()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuOpen = false
+        updateStatus()
+    }
+
     private func refreshIcons() {
-        ProviderIcons.refreshWebIcons { [weak self] in
-            self?.controller.sendProviderIcons()
-            self?.updateStatus()
-        }
+        ProviderIcons.refreshWebIcons { [weak self] in self?.controller.sendProviderIcons() }
     }
 
     private func checkForUpdate(force: Bool = false) {
         Updates.check(force: force) { [weak self] info in self?.controller.setUpdate(info) }
     }
 
-    /// One item per service (its Active account) up to the Menu Bar Shows limit, or the rabbit when there are no cards. Dimmed (and
-    /// "not up to date" for VoiceOver) when the last refresh failed or the last success is older than 15 minutes.
+    /// One item per service turned on in Settings (its Active account), or the rabbit when none is shown. Each service's logo
+    /// and percentage are in its color; plain while a menu is open or Increase Contrast is on, dimmed (and "not up to date"
+    /// for VoiceOver) when the last refresh failed or the last success is older than 15 minutes.
     private func updateStatus() {
         syncAppEnvironment()
+        if let snapshot = controller.snapshot { settings.migrate(snapshot) }
         guard let button = statusItem.button else { return }
         let stale = MenuBar.isStale(lastSuccess: controller.lastSuccess, failed: controller.lastError != nil, now: Date())
         button.toolTip = MenuBar.tooltip(updated: controller.lastSuccess.map(Self.timeText), error: controller.lastError)
-        let (items, more) = controller.snapshot.map { MenuBar.items($0, limit: serviceLimit) } ?? ([], 0)
-        button.setAccessibilityLabel(MenuBar.accessibilityLabel(items, more: more, stale: stale))
+        let items = controller.snapshot.map { MenuBar.items($0, hidden: settings.hidden) } ?? []
+        button.setAccessibilityLabel(MenuBar.accessibilityLabel(items, stale: stale))
         guard !items.isEmpty else {
             button.attributedTitle = NSAttributedString(string: "")
             button.image = Self.rabbit
             button.appearsDisabled = stale
             return
         }
-        let label = NSMutableAttributedString()
-        for (index, item) in items.enumerated() {
-            if index > 0 { label.append(NSAttributedString(string: "   ")) }
-            if let icon = ProviderIcons.menuImage(item.provider) {
-                let attachment = NSTextAttachment()
-                attachment.image = icon
-                attachment.bounds = NSRect(x: 0, y: -2, width: 13, height: 13)
-                label.append(NSAttributedString(attachment: attachment))
-                label.append(NSAttributedString(string: " "))
-            }
-            label.append(NSAttributedString(string: MenuBar.percentText(item.percent)))
-        }
-        label.append(NSAttributedString(string: MenuBar.suffix(more: more)))
-        var attributes: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)]
-        if stale { attributes[.foregroundColor] = NSColor.secondaryLabelColor }
-        label.addAttributes(attributes, range: NSRange(location: 0, length: label.length))
+        let paint = MenuBarStyle.paint(highlighted: popover?.isShown == true || menuOpen, stale: stale,
+                                       increaseContrast: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast)
         button.appearsDisabled = false
         button.image = nil
-        button.attributedTitle = label
+        button.attributedTitle = MenuBarGlyphs.label(items, paint: paint, color: settings.color)
     }
 
     private static func timeText(_ date: Date) -> String {

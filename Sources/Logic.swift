@@ -79,23 +79,41 @@ struct MenuBarItem: Equatable {
 
 enum MenuBar {
     static let names = ["claude": "Claude", "codex": "Codex"]
+    static let allServices = ["claude", "codex"]
     static let staleAfter: TimeInterval = 15 * 60
     static let figureSpace = "\u{2007}"
 
-    static let defaultServiceLimit = 2
-    static let serviceLimitKey = "menuBarServices"  // UserDefaults: 1, 2, 3, or 0 for all
+    static let hiddenKey = "menuBarHidden"  // UserDefaults: the services turned off in Settings
+    /// The old "Menu Bar Shows" count (1, 2, … or 0 for all), read once to turn the services past it off.
+    static let serviceLimitKey = "menuBarServices"
 
-    /// One item per service, in card order: the Active account's usage when its card is shown, else the
-    /// service's first card. At most `limit` services (nil for all); `more` counts the services left out,
-    /// so extra accounts of a shown service never add a "+N".
-    static func items(_ snapshot: [String: Any], limit: Int? = defaultServiceLimit) -> (items: [MenuBarItem], more: Int) {
+    /// The services with cards, in card order.
+    static func order(_ snapshot: [String: Any]) -> [String] {
         let cards = snapshot["cards"] as? [[String: Any]] ?? []
-        let providers = snapshot["providers"] as? [String: Any] ?? [:]
         var order: [String] = []
         for case let provider? in cards.map({ $0["provider"] as? String }) where !order.contains(provider) {
             order.append(provider)
         }
-        let all = order.map { provider -> MenuBarItem in
+        return order
+    }
+
+    /// Settings lists every service: those with cards in card order, then the rest.
+    static func services(_ snapshot: [String: Any]?) -> [String] {
+        let shown = snapshot.map(order) ?? []
+        return shown + allServices.filter { !shown.contains($0) }
+    }
+
+    /// The old "Menu Bar Shows" count as switches: the services past it, in card order, are turned off.
+    static func hidden(migrating limit: Int, order: [String]) -> Set<String> {
+        limit > 0 ? Set(order.dropFirst(limit)) : []
+    }
+
+    /// One item per service turned on, in card order: the Active account's usage when its card is shown,
+    /// else the service's first card.
+    static func items(_ snapshot: [String: Any], hidden: Set<String> = []) -> [MenuBarItem] {
+        let cards = snapshot["cards"] as? [[String: Any]] ?? []
+        let providers = snapshot["providers"] as? [String: Any] ?? [:]
+        return order(snapshot).filter { !hidden.contains($0) }.map { provider -> MenuBarItem in
             let info = providers[provider] as? [String: Any] ?? [:]
             let shown = cards.filter { $0["provider"] as? String == provider }.compactMap { $0["id"] as? String }
             let accounts = info["accounts"] as? [[String: Any]] ?? []
@@ -105,22 +123,6 @@ enum MenuBar {
             let windows = accounts.first { $0["id"] as? String == id }?["windows"] as? [String: Any] ?? [:]
             return MenuBarItem(provider: provider, percent: usedPercent(windows).flatMap(clampPercent))
         }
-        let count = limit.map { max(1, $0) } ?? all.count
-        return (Array(all.prefix(count)), max(0, all.count - count))
-    }
-
-    /// The stored "Menu Bar Shows" choice: a number of services, or 0 (or anything unknown) for all of them.
-    static func serviceLimit(stored: Int?) -> Int? {
-        guard let stored else { return defaultServiceLimit }
-        return stored > 0 ? stored : nil
-    }
-
-    /// "Menu Bar Shows" offers 1…N for the N services with cards; picking N stores 0 (all), so a service
-    /// added later shows up too. Returns the choices and the one to check.
-    static func serviceChoices(services: Int, stored: Int?) -> (choices: [Int], checked: Int) {
-        let count = services > 0 ? services : PageMessage.providers.count  // before the first snapshot: every service
-        let limit = serviceLimit(stored: stored) ?? count
-        return (Array(1...count), min(limit, count))
     }
 
     /// The higher of the 5-hour and weekly windows, else the highest of any window.
@@ -143,13 +145,8 @@ enum MenuBar {
         return String(repeating: figureSpace, count: max(0, 3 - digits.count)) + digits + "%"
     }
 
-    static func suffix(more: Int) -> String {
-        more > 0 ? "  +\(more)" : ""
-    }
-
-    static func accessibilityLabel(_ items: [MenuBarItem], more: Int, stale: Bool) -> String {
-        var parts = items.map { "\(names[$0.provider] ?? $0.provider) \($0.percent.map { "\($0)%" } ?? "no data")" }
-        if more > 0 { parts.append("\(more) more") }
+    static func accessibilityLabel(_ items: [MenuBarItem], stale: Bool) -> String {
+        let parts = items.map { "\(names[$0.provider] ?? $0.provider) \($0.percent.map { "\($0)%" } ?? "no data")" }
         return "Usagi" + (parts.isEmpty ? "" : ": " + parts.joined(separator: ", ")) + (stale ? " (not up to date)" : "")
     }
 
@@ -160,6 +157,182 @@ enum MenuBar {
     static func tooltip(updated: String?, error: String?) -> String {
         (["Usagi", updated.map { "Updated \($0)" } ?? "Not updated yet"] + [error].compactMap { $0 })
             .joined(separator: "\n")
+    }
+}
+
+/// An sRGB color, each component 0…1.
+struct RGB: Equatable {
+    var red: Double, green: Double, blue: Double
+
+    init(red: Double, green: Double, blue: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+
+    /// "#CC7C5E", with or without the "#", in either case; spaces around it are ignored.
+    init?(hex text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digits = trimmed.hasPrefix("#") ? trimmed.dropFirst() : Substring(trimmed)
+        guard digits.count == 6, digits.allSatisfy(\.isHexDigit), let value = Int(digits, radix: 16) else { return nil }
+        self.init(red: Double(value >> 16 & 0xFF) / 255, green: Double(value >> 8 & 0xFF) / 255,
+                  blue: Double(value & 0xFF) / 255)
+    }
+
+    var hex: String {
+        "#" + [red, green, blue].map { String(format: "%02X", Int((min(1, max(0, $0.isNaN ? 0 : $0)) * 255).rounded())) }
+            .joined()
+    }
+
+    /// WCAG relative luminance.
+    var luminance: Double {
+        func linear(_ value: Double) -> Double {
+            value <= 0.03928 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+    }
+
+    /// WCAG contrast ratio, 1 (none) to 21 (black on white).
+    func contrast(with other: RGB) -> Double {
+        let (a, b) = (luminance, other.luminance)
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+}
+
+/// Settings: each service's color, drawn on its logo and percentage in the menu bar.
+enum MenuBarStyle {
+    enum Paint: Equatable { case color, plain, dimmed }
+
+    static let defaultColors = ["claude": RGB(red: 0xCC / 255.0, green: 0x7C / 255.0, blue: 0x5E / 255.0),
+                                "codex": RGB(red: 0x49 / 255.0, green: 0xA3 / 255.0, blue: 0xB0 / 255.0)]
+    /// Conservative stand-ins for the menu bar behind the item (85% gray when light, 25% when dark), as in CodexBar.
+    static let lightBar = RGB(red: 0.85, green: 0.85, blue: 0.85), darkBar = RGB(red: 0.25, green: 0.25, blue: 0.25)
+    static let minimumContrast = 2.0
+
+    static func colorKey(_ provider: String) -> String { "menuBarColor.\(provider)" }
+
+    /// The stored "#RRGGBB", else the service's default.
+    static func color(_ provider: String, stored: String?) -> RGB {
+        stored.flatMap(RGB.init(hex:)) ?? defaultColors[provider] ?? RGB(red: 0.5, green: 0.5, blue: 0.5)
+    }
+
+    /// Whether the color stands out from a light or dark menu bar; where it doesn't, the plain label color is used.
+    static func readable(_ color: RGB, dark: Bool) -> Bool {
+        color.contrast(with: dark ? darkBar : lightBar) >= minimumContrast
+    }
+
+    /// Shown under a color in Settings. With these two bars and 2:1, no color is too faint on both.
+    static func contrastWarning(_ color: RGB) -> String? {
+        if !readable(color, dark: false) { return "Too faint on a light menu bar, so it's shown in black there." }
+        if !readable(color, dark: true) { return "Too faint on a dark menu bar, so it's shown in white there." }
+        return nil
+    }
+
+    /// Plain while a menu is open (the highlight would swallow the colors) or Increase Contrast is on, dimmed while
+    /// the numbers are out of date, else each service in its color.
+    static func paint(highlighted: Bool, stale: Bool, increaseContrast: Bool) -> Paint {
+        if stale { return .dimmed }
+        return highlighted || increaseContrast ? .plain : .color
+    }
+}
+
+/// SVG path data limited to the absolute M, L, H, V, C and Z commands the logos use.
+enum SVGPath {
+    enum Step: Equatable {
+        case move(Double, Double), line(Double, Double), curve(Double, Double, Double, Double, Double, Double), close
+    }
+
+    /// The steps, or nil for anything else (relative or other commands, missing or stray numbers).
+    static func steps(_ data: String) -> [Step]? {
+        var scanner = Scanner(Array(data.unicodeScalars))
+        var steps: [Step] = [], command: Unicode.Scalar?
+        var pen = (x: 0.0, y: 0.0), start = pen
+        var bare = false  // a command letter still waiting for its numbers
+        while scanner.skipSeparators() {
+            if let letter = scanner.letter() {
+                guard !bare else { return nil }
+                bare = letter != "Z"
+                command = letter
+                if letter == "Z" {
+                    steps.append(.close)
+                    pen = start
+                    command = nil
+                }
+                continue
+            }
+            switch command {
+            case "M", "L":
+                guard let x = scanner.number(), let y = scanner.number() else { return nil }
+                steps.append(command == "M" ? .move(x, y) : .line(x, y))
+                if command == "M" { start = (x, y) }
+                pen = (x, y)
+                command = "L"  // more pairs after M are lines
+            case "H":
+                guard let x = scanner.number() else { return nil }
+                pen.x = x
+                steps.append(.line(pen.x, pen.y))
+            case "V":
+                guard let y = scanner.number() else { return nil }
+                pen.y = y
+                steps.append(.line(pen.x, pen.y))
+            case "C":
+                guard let a = scanner.number(), let b = scanner.number(), let c = scanner.number(),
+                      let d = scanner.number(), let x = scanner.number(), let y = scanner.number() else { return nil }
+                steps.append(.curve(a, b, c, d, x, y))
+                pen = (x, y)
+            default:
+                return nil
+            }
+            bare = false
+        }
+        guard !bare, case .move? = steps.first else { return nil }
+        return steps
+    }
+
+    private struct Scanner {
+        let scalars: [Unicode.Scalar]
+        var index = 0
+
+        init(_ scalars: [Unicode.Scalar]) { self.scalars = scalars }
+
+        /// Skips spaces and commas; false at the end.
+        mutating func skipSeparators() -> Bool {
+            while index < scalars.count, [" ", ",", "\n", "\t", "\r"].contains(scalars[index]) { index += 1 }
+            return index < scalars.count
+        }
+
+        /// A supported command letter; any other letter is left for `number` to reject.
+        mutating func letter() -> Unicode.Scalar? {
+            guard ["M", "L", "H", "V", "C", "Z"].contains(scalars[index]) else { return nil }
+            defer { index += 1 }
+            return scalars[index]
+        }
+
+        /// A number such as 12, -3.5, .5 or 1e-2; "1-2" and "1.5.5" are two numbers each.
+        mutating func number() -> Double? {
+            guard skipSeparators() else { return nil }
+            let begin = index
+            func digits() -> Int {
+                let from = index
+                while index < scalars.count, ("0"..."9").contains(scalars[index]) { index += 1 }
+                return index - from
+            }
+            if ["+", "-"].contains(scalars[index]) { index += 1 }
+            var count = digits()
+            if index < scalars.count, scalars[index] == "." {
+                index += 1
+                count += digits()
+            }
+            guard count > 0 else { return nil }
+            if index < scalars.count, ["e", "E"].contains(scalars[index]) {
+                index += 1
+                if index < scalars.count, ["+", "-"].contains(scalars[index]) { index += 1 }
+                guard digits() > 0 else { return nil }
+            }
+            var text = ""
+            text.unicodeScalars.append(contentsOf: scalars[begin..<index])
+            return Double(text)
+        }
     }
 }
 

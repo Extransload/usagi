@@ -45,8 +45,70 @@ enum Network {
     }
 }
 
-/// Provider icons from the installed apps, else the claude.ai icon downloaded to ~/.config/usagi/icons.
-/// Rendered once and kept in memory until a download replaces the file.
+/// The menu bar's logos (Glyphs), filled with a color resolved each time they are drawn, so a dynamic color follows
+/// the menu bar's light or dark appearance.
+enum MenuBarGlyphs {
+    static let size: CGFloat = 14
+    private static let steps = Glyphs.paths.compactMapValues(SVGPath.steps)
+
+    static func image(_ provider: String, color: NSColor) -> NSImage? {
+        guard let steps = steps[provider] else { return nil }
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: true) { rect in
+            let path = NSBezierPath()
+            for step in steps {
+                switch step {
+                case .move(let x, let y): path.move(to: NSPoint(x: x, y: y))
+                case .line(let x, let y): path.line(to: NSPoint(x: x, y: y))
+                case .curve(let x1, let y1, let x2, let y2, let x, let y):
+                    path.curve(to: NSPoint(x: x, y: y), controlPoint1: NSPoint(x: x1, y: y1), controlPoint2: NSPoint(x: x2, y: y2))
+                case .close: path.close()
+                }
+            }
+            path.transform(using: AffineTransform(scale: rect.width / 100))
+            color.setFill()
+            path.fill()
+            return true
+        }
+        image.accessibilityDescription = MenuBar.names[provider]
+        return image
+    }
+
+    /// Each service's logo and percentage, painted in its color, plain or dimmed.
+    static func label(_ items: [MenuBarItem], paint: MenuBarStyle.Paint, color: (String) -> RGB) -> NSAttributedString {
+        let label = NSMutableAttributedString()
+        for (index, item) in items.enumerated() {
+            if index > 0 { label.append(NSAttributedString(string: "   ")) }
+            let ink: NSColor
+            switch paint {
+            case .color: ink = tint(color(item.provider))
+            case .plain: ink = .labelColor
+            case .dimmed: ink = .secondaryLabelColor
+            }
+            if let glyph = image(item.provider, color: ink) {
+                let attachment = NSTextAttachment()
+                attachment.image = glyph
+                attachment.bounds = NSRect(x: 0, y: -3, width: size, height: size)
+                label.append(NSAttributedString(attachment: attachment))
+                label.append(NSAttributedString(string: " "))
+            }
+            label.append(NSAttributedString(string: MenuBar.percentText(item.percent), attributes: [.foregroundColor: ink]))
+        }
+        label.addAttribute(.font, value: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
+                           range: NSRange(location: 0, length: label.length))
+        return label
+    }
+
+    /// The service's color where it stands out from the menu bar's current appearance, else the label color.
+    static func tint(_ color: RGB) -> NSColor {
+        let fill = NSColor(srgbRed: color.red, green: color.green, blue: color.blue, alpha: 1)
+        return NSColor(name: nil) { appearance in
+            MenuBarStyle.readable(color, dark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua) ? fill : .labelColor
+        }
+    }
+}
+
+/// Provider icons for the cards: from the installed apps, else the claude.ai icon downloaded to
+/// ~/.config/usagi/icons. Rendered once and kept in memory until a download replaces the file.
 @MainActor enum ProviderIcons {
     static let apps = ["claude": ["com.anthropic.claudefordesktop"], "codex": ["com.openai.codex", "com.openai.chat"]]
     static let web = ["claude": URL(string: "https://claude.ai/apple-touch-icon.png")!]
@@ -54,15 +116,12 @@ enum Network {
 
     private struct Entry {
         var tile: NSBitmapImageRep?
-        var menu: NSImage?
     }
 
     private static var entries: [String: Entry] = [:]
     private static var urls: [String: String]?
     private static var downloading: Set<String> = []
     private static var attempted: [String: Date] = [:]
-
-    static func menuImage(_ provider: String) -> NSImage? { entry(provider).menu }
 
     static func dataURLs() -> [String: String] {
         if let urls { return urls }
@@ -122,14 +181,7 @@ enum Network {
         if let entry = entries[provider] { return entry }
         let tile = appIcon(provider).flatMap { render($0, margin: 100.0 / 824) }
             ?? webIcon(provider).flatMap { render(NSImage(cgImage: $0, size: .zero), margin: 0) }
-        let menu = tile.map { rep -> NSImage in
-            let image = NSImage(size: rep.size)
-            image.addRepresentation(rep)
-            return image
-        } ?? Bundle.main.url(forResource: provider, withExtension: "png", subdirectory: "assets").flatMap(NSImage.init(contentsOf:))
-        menu?.size = NSSize(width: 13, height: 13)
-        menu?.accessibilityDescription = MenuBar.names[provider]
-        let entry = Entry(tile: tile, menu: menu)
+        let entry = Entry(tile: tile)
         entries[provider] = entry
         return entry
     }

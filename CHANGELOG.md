@@ -2,6 +2,17 @@
 
 All notable changes to Usagi. Each `## X.Y.Z` section is used as the release notes for that version: `release.sh` and the Release workflow stop if the section is missing.
 
+## 1.0.11
+
+### Added
+
+- **Settings…** in the right-click menu. Each service has a **Color** for its logo and percentage in the menu bar (a hex field and a color well, with its default and **Reset**) and a **Show in menu bar** switch. A color too faint against a light or dark menu bar is drawn in black or white there, and Settings says so.
+
+### Changed
+
+- The menu bar draws the Claude and OpenAI logos itself, in each service's color, instead of showing the apps' icons. While a menu is open, the numbers are out of date, or Increase contrast is on, it shows them without color.
+- **Menu Bar Shows** and the "+N" after the services are gone: the menu bar shows the services switched on in Settings. If it was set to show 1 service, only the first service in card order stays on.
+
 ## 1.0.10
 
 ### Changed

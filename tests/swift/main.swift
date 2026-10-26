@@ -89,41 +89,43 @@ let snapshot: [String: Any] = [
     ],
 ]
 let menu = MenuBar.items(snapshot)
-equal(menu.items, [MenuBarItem(provider: "claude", percent: 42), MenuBarItem(provider: "codex", percent: 12)], "items")
-equal(menu.more, 0, "a second Codex account is not another service")
+equal(menu, [MenuBarItem(provider: "claude", percent: 42), MenuBarItem(provider: "codex", percent: 12)],
+      "one item per service: a second Codex account is not another service")
 var activeSecond = snapshot
 activeSecond["providers"] = [
     "claude": ["active": "default", "accounts": [account("default", ["5h": 41.6])]],
     "codex": ["active": "account-2", "accounts": [account("default", ["30d": 12.4]), account("account-2", ["5h": 70])]],
 ]
-equal(MenuBar.items(activeSecond).items.last, MenuBarItem(provider: "codex", percent: 70), "the Active account's usage")
+equal(MenuBar.items(activeSecond).last, MenuBarItem(provider: "codex", percent: 70), "the Active account's usage")
 var hiddenActive = activeSecond
 hiddenActive["cards"] = [["provider": "claude", "id": "default"], ["provider": "codex", "id": "default"]]
-equal(MenuBar.items(hiddenActive).items.last, MenuBarItem(provider: "codex", percent: 12), "Active card hidden: first card")
+equal(MenuBar.items(hiddenActive).last, MenuBarItem(provider: "codex", percent: 12), "Active card hidden: first card")
 var savedOrder = activeSecond
 savedOrder["cards"] = [["provider": "codex", "id": "account-3"], ["provider": "codex", "id": "account-2"]]
 savedOrder["providers"] = ["codex": ["active": "default", "accounts": [account("default", ["5h": 1]), account("account-2", ["5h": 20]), account("account-3", ["5h": 30])]]]
-equal(MenuBar.items(savedOrder).items, [MenuBarItem(provider: "codex", percent: 20)], "fallback follows the page's order")
-equal(MenuBar.items(snapshot, limit: 1).items, [MenuBarItem(provider: "claude", percent: 42)], "limit 1")
-equal(MenuBar.items(snapshot, limit: 1).more, 1, "one service left out")
-equal(MenuBar.items(snapshot, limit: nil).items.count, 2, "all services")
-equal(MenuBar.serviceLimit(stored: nil), 2, "default limit")
-equal(MenuBar.serviceLimit(stored: 1), 1, "stored limit")
-equal(MenuBar.serviceLimit(stored: 3), 3, "any number")
-equal(MenuBar.serviceChoices(services: 2, stored: nil).choices, [1, 2], "1…N for the services shown")
-equal(MenuBar.serviceChoices(services: 2, stored: 0).checked, 2, "all checks the largest")
-equal(MenuBar.serviceChoices(services: 3, stored: 2).checked, 2, "a smaller limit")
-equal(MenuBar.serviceChoices(services: 2, stored: 5).checked, 2, "a limit above the services checks the largest")
-equal(MenuBar.serviceChoices(services: 0, stored: nil).choices, [1, 2], "before a snapshot: every known service")
-equal(MenuBar.serviceChoices(services: 0, stored: 1).checked, 1, "and the stored choice stays checked")
+equal(MenuBar.items(savedOrder), [MenuBarItem(provider: "codex", percent: 20)], "fallback follows the page's order")
+equal(MenuBar.items(snapshot, hidden: ["claude"]), [MenuBarItem(provider: "codex", percent: 12)], "a service turned off")
+equal(MenuBar.items(snapshot, hidden: ["claude", "codex"]), [], "every service turned off")
+equal(MenuBar.items(snapshot, hidden: ["gemini"]), menu, "an unknown name changes nothing")
+var codexFirst = snapshot
+codexFirst["cards"] = [["provider": "codex", "id": "default"], ["provider": "claude", "id": "default"]]
+equal(MenuBar.order(codexFirst), ["codex", "claude"], "services in card order")
+equal(MenuBar.services(codexFirst), ["codex", "claude"], "Settings lists services in card order")
+equal(MenuBar.services(savedOrder), ["codex", "claude"], "then services without cards")
+equal(MenuBar.services(nil), ["claude", "codex"], "before a snapshot: every service")
+equal(MenuBar.hidden(migrating: 1, order: ["codex", "claude"]), ["claude"], "Menu Bar Shows 1: the rest are turned off")
+equal(MenuBar.hidden(migrating: 2, order: ["codex", "claude"]), [], "Menu Bar Shows 2: nothing turned off")
+equal(MenuBar.hidden(migrating: 0, order: ["codex", "claude"]), [], "Menu Bar Shows all")
+equal(MenuBar.hidden(migrating: 5, order: ["claude"]), [], "a count above the services")
+equal(MenuBar.hidden(migrating: 1, order: MenuBar.services(["cards": [["provider": "claude", "id": "default"]]])), ["codex"],
+      "a service without cards yet stays off too")
 equal(PageMessage.parse(["action": "reorder", "order": "codex,claude"]), .bridge(["reorder", "codex,claude"]), "reorder")
 equal(PageMessage.parse(["action": "reorder", "order": "codex"]), .bridge(["reorder", "codex"]), "reorder one")
 for bad in ["codex,codex", "gemini", "", "codex,", ",claude"] {
     equal(PageMessage.parse(["action": "reorder", "order": bad]), nil, "reorder rejects \(bad)")
 }
-equal(MenuBar.serviceLimit(stored: 0), nil, "0 means all")
-equal(MenuBar.items(["cards": [], "providers": [:]]).items, [], "no cards")
-equal(MenuBar.items(["cards": [["provider": "claude", "id": "gone"]], "providers": [:]]).items,
+equal(MenuBar.items(["cards": [], "providers": [:]]), [], "no cards")
+equal(MenuBar.items(["cards": [["provider": "claude", "id": "gone"]], "providers": [:]]),
       [MenuBarItem(provider: "claude", percent: nil)], "missing account")
 equal(MenuBar.usedPercent(["5h": ["used_percent": 3.0], "7d": ["used_percent": 55.0], "opus": ["used_percent": 99.0]]), 55,
       "5h/7d preferred over model windows")
@@ -140,12 +142,76 @@ equal(MenuBar.percentText(42), fs + "42%", "pads two digits")
 equal(MenuBar.percentText(100), "100%", "three digits")
 equal(MenuBar.percentText(nil), fs + fs + "–" + fs, "no data")
 equal(MenuBar.percentText(5).count, MenuBar.percentText(nil).count, "same width with and without data")
-equal(MenuBar.suffix(more: 0), "", "no suffix")
-equal(MenuBar.suffix(more: 2), "  +2", "more, no stale marker")
-equal(MenuBar.accessibilityLabel(menu.items, more: 1, stale: false), "Usagi: Claude 42%, Codex 12%, 1 more", "a11y label")
-equal(MenuBar.accessibilityLabel([MenuBarItem(provider: "codex", percent: nil)], more: 0, stale: true),
+equal(MenuBar.accessibilityLabel(menu, stale: false), "Usagi: Claude 42%, Codex 12%", "a11y label")
+equal(MenuBar.accessibilityLabel([MenuBarItem(provider: "codex", percent: nil)], stale: true),
       "Usagi: Codex no data (not up to date)", "a11y no data, stale")
-equal(MenuBar.accessibilityLabel([], more: 0, stale: false), "Usagi", "a11y without cards")
+equal(MenuBar.accessibilityLabel([], stale: false), "Usagi", "a11y without cards")
+
+// Menu bar colors
+let claudeDefault = RGB(red: 0xCC / 255.0, green: 0x7C / 255.0, blue: 0x5E / 255.0)
+equal(RGB(hex: "#CC7C5E"), claudeDefault, "hex")
+equal(RGB(hex: "cc7c5e"), claudeDefault, "lower case without #")
+equal(RGB(hex: " #cc7c5e\n"), claudeDefault, "surrounding spaces")
+for bad in ["", "#", "#CC7C5", "#CC7C5E0", "#CC7C5E00", "#GG0000", "red", "#+C7C5E", "# CC7C5E"] {
+    equal(RGB(hex: bad), nil, "rejects \(bad.debugDescription)")
+}
+equal(claudeDefault.hex, "#CC7C5E", "back to hex")
+equal(RGB(red: 1, green: 0, blue: 0.5).hex, "#FF0080", "rounds to the nearest step")
+equal(RGB(red: 1.4, green: -0.2, blue: .nan).hex, "#FF0000", "out of range and nan are clamped")
+let white = RGB(red: 1, green: 1, blue: 1), black = RGB(red: 0, green: 0, blue: 0)
+check(abs(white.contrast(with: black) - 21) < 1e-9, "black on white")
+check(abs(black.contrast(with: white) - 21) < 1e-9, "either way round")
+check(abs(claudeDefault.contrast(with: claudeDefault) - 1) < 1e-9, "a color on itself")
+equal(MenuBarStyle.color("claude", stored: nil), claudeDefault, "Claude's default")
+equal(MenuBarStyle.color("codex", stored: nil), RGB(hex: "#49A3B0"), "Codex's default")
+equal(MenuBarStyle.color("claude", stored: "#112233"), RGB(hex: "#112233"), "a stored color")
+equal(MenuBarStyle.color("claude", stored: "junk"), claudeDefault, "an unreadable stored color falls back")
+equal(MenuBarStyle.colorKey("codex"), "menuBarColor.codex", "UserDefaults key")
+for provider in MenuBar.allServices {
+    let color = MenuBarStyle.color(provider, stored: nil)
+    check(MenuBarStyle.readable(color, dark: false) && MenuBarStyle.readable(color, dark: true), "\(provider)'s default reads on both bars")
+}
+let paleYellow = RGB(red: 1, green: 1, blue: 0.6), nearBlack = RGB(red: 0x22 / 255.0, green: 0x22 / 255.0, blue: 0x22 / 255.0)
+check(!MenuBarStyle.readable(paleYellow, dark: false), "pale yellow is too faint on a light bar")
+check(MenuBarStyle.readable(paleYellow, dark: true), "but reads on a dark bar")
+check(!MenuBarStyle.readable(nearBlack, dark: true), "near black is too faint on a dark bar")
+check(MenuBarStyle.readable(nearBlack, dark: false), "but reads on a light bar")
+equal(MenuBarStyle.contrastWarning(claudeDefault), nil, "no warning for a color that reads everywhere")
+equal(MenuBarStyle.contrastWarning(paleYellow), "Too faint on a light menu bar, so it's shown in black there.", "light bar")
+equal(MenuBarStyle.contrastWarning(nearBlack), "Too faint on a dark menu bar, so it's shown in white there.", "dark bar")
+equal(MenuBarStyle.contrastWarning(RGB(red: 0.5, green: 0.5, blue: 0.5)), nil, "mid gray reads on both bars")
+equal(MenuBarStyle.paint(highlighted: false, stale: false, increaseContrast: false), .color, "fresh: in color")
+equal(MenuBarStyle.paint(highlighted: true, stale: false, increaseContrast: false), .plain, "menu open: plain")
+equal(MenuBarStyle.paint(highlighted: false, stale: false, increaseContrast: true), .plain, "Increase Contrast: plain")
+equal(MenuBarStyle.paint(highlighted: false, stale: true, increaseContrast: false), .dimmed, "out of date: dimmed")
+equal(MenuBarStyle.paint(highlighted: true, stale: true, increaseContrast: true), .dimmed, "out of date wins")
+
+// Logo paths
+typealias Step = SVGPath.Step
+equal(SVGPath.steps("M1 2L3 4H5V6C1 2 3 4 5 6Z"),
+      [Step.move(1, 2), .line(3, 4), .line(5, 4), .line(5, 6), .curve(1, 2, 3, 4, 5, 6), .close], "each command")
+equal(SVGPath.steps("M1-2.5.5,4 6 7"), [Step.move(1, -2.5), .line(0.5, 4), .line(6, 7)],
+      "packed numbers, commas, and pairs after M are lines")
+equal(SVGPath.steps("M1 1L2 2ZH5V3"), [Step.move(1, 1), .line(2, 2), .close, .line(5, 1), .line(5, 3)],
+      "after Z the pen is back at the start")
+equal(SVGPath.steps("M0 0L1e1 2E-1"), [Step.move(0, 0), .line(10, 0.2)], "exponents")
+for bad in ["", "L1 2", "M1", "M1 2L3", "m1 2", "M1 2Q3 4 5 6", "M1 2 x", "M1 2-", "M1 2C1 2 3 4 5", "M1 2L", "M1 2LL3 4", "MZ"] {
+    equal(SVGPath.steps(bad), nil, "rejects \(bad.debugDescription)")
+}
+for (provider, data) in Glyphs.paths {
+    let steps = SVGPath.steps(data) ?? []
+    check(steps.count > 20, "\(provider)'s logo parses")
+    check({ if case .move? = steps.first { return true }; return false }(), "\(provider)'s logo starts with a move")
+    let inside = steps.allSatisfy { step in
+        switch step {
+        case .move(let x, let y), .line(let x, let y): return (0...100).contains(x) && (0...100).contains(y)
+        case .curve(let a, let b, let c, let d, let x, let y): return [a, b, c, d, x, y].allSatisfy { (0...100).contains($0) }
+        case .close: return true
+        }
+    }
+    check(inside, "\(provider)'s logo stays inside its 100×100 box")
+}
+equal(Set(Glyphs.paths.keys), Set(MenuBar.allServices), "a logo for every service")
 check(!MenuBar.isStale(lastSuccess: nil, failed: false, now: t0), "not stale before the first refresh")
 check(MenuBar.isStale(lastSuccess: t0, failed: true, now: t0), "stale after a failure")
 check(!MenuBar.isStale(lastSuccess: t0, failed: false, now: t0 + 15 * 60), "fresh at 15 minutes")
