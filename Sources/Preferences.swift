@@ -111,4 +111,13 @@ import Foundation
         get { defaults.object(forKey: LimitAlerts.resetKey) as? Bool ?? true }
         set { store(newValue ? nil : false, LimitAlerts.resetKey) }
     }
+
+    /// What each limit last showed, for LimitNotifier. Bookkeeping, not a setting: changing it announces nothing.
+    var alertState: [String: LimitAlerts.Record] {
+        get {
+            defaults.data(forKey: LimitAlerts.stateKey).flatMap { try? JSONDecoder().decode([String: LimitAlerts.Record].self, from: $0) }
+                ?? [:]
+        }
+        set { defaults.set(try? JSONEncoder().encode(newValue), forKey: LimitAlerts.stateKey) }
+    }
 }

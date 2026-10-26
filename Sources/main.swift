@@ -132,6 +132,8 @@ enum LaunchEnvironment {
     private var syncedSnapshot: Date?, syncedOff = false  // the snapshot last synced, to skip repeats
     private var requestedHeight: Double = 540
     private let preferences = Preferences()
+    private let notifier = LimitNotifier()
+    private var alertedSnapshot: Date?  // the snapshot the limit alerts last looked at
     private let settingsWindow = SettingsWindow()
     private var menuOpen = false
 
@@ -168,6 +170,7 @@ enum LaunchEnvironment {
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         controller = UsageController()
         controller.hiddenInterval = preferences.refreshInterval
+        notifier.opened = { [weak self] in self?.showPopover() }
         controller.onStatus = { [weak self] in self?.updateStatus() }
         controller.onCheckUpdates = { [weak self] in self?.checkForUpdate(force: true) }
         controller.onResize = { [weak self] height in
@@ -337,7 +340,13 @@ enum LaunchEnvironment {
     /// for VoiceOver) when the last refresh failed or the last success is older than 15 minutes.
     private func updateStatus() {
         syncAppEnvironment()
-        if let snapshot = controller.snapshot { preferences.migrate(snapshot) }
+        if let snapshot = controller.snapshot {
+            preferences.migrate(snapshot)
+            if controller.lastSuccess != alertedSnapshot {
+                alertedSnapshot = controller.lastSuccess
+                notifier.check(snapshot, preferences: preferences)
+            }
+        }
         guard let button = statusItem.button else { return }
         let stale = MenuBar.isStale(lastSuccess: controller.lastSuccess, failed: controller.lastError != nil, now: Date(),
                                     refreshInterval: preferences.refreshInterval)
