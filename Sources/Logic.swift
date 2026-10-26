@@ -490,6 +490,32 @@ enum LimitAlerts {
     }
 }
 
+/// The "Open Usagi" keyboard shortcut. `modifiers` holds NSEvent.ModifierFlags bits; `key` is the key's name as it was
+/// shown when recorded ("U", "F5", "Space").
+struct Shortcut: Codable, Equatable {
+    var keyCode: UInt32
+    var modifiers: UInt
+    var key: String
+
+    static let command: UInt = 1 << 20, option: UInt = 1 << 19, control: UInt = 1 << 18, shift: UInt = 1 << 17
+    static let storeKey = "openShortcut"
+
+    /// ⌘, ⌥ or ⌃ is required: with ⇧ alone (or nothing) the shortcut would swallow ordinary typing.
+    var isAllowed: Bool { modifiers & (Self.command | Self.option | Self.control) != 0 }
+
+    /// In the order macOS menus use: ⌃⌥⇧⌘, then the key.
+    var display: String {
+        [(Self.control, "⌃"), (Self.option, "⌥"), (Self.shift, "⇧"), (Self.command, "⌘")]
+            .filter { modifiers & $0.0 != 0 }.map(\.1).joined() + key
+    }
+
+    /// For RegisterEventHotKey: cmdKey, shiftKey, optionKey and controlKey from Carbon's Events.h.
+    var carbonModifiers: UInt32 {
+        [(Self.command, UInt32(0x100)), (Self.shift, 0x200), (Self.option, 0x800), (Self.control, 0x1000)]
+            .filter { modifiers & $0.0 != 0 }.reduce(0) { $0 | $1.1 }
+    }
+}
+
 enum Cadence {
     static let shown: TimeInterval = 60, hidden: TimeInterval = 300, onOpen: TimeInterval = 30
 

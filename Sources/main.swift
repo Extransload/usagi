@@ -134,6 +134,10 @@ enum LaunchEnvironment {
     private let preferences = Preferences()
     private let notifier = LimitNotifier()
     private var alertedSnapshot: Date?  // the snapshot the limit alerts last looked at
+    private let hotKey = HotKey()
+    private var registeredShortcut: Shortcut?
+    /// The system refused the shortcut in Settings (another app holds it); Settings says so.
+    private(set) var shortcutFailed = false
     private let settingsWindow = SettingsWindow()
     private var menuOpen = false
 
@@ -195,6 +199,7 @@ enum LaunchEnvironment {
         controller.loadViewIfNeeded()
         controller.setAlsoUseInApps(alsoUseInApps)
         updateStatus()
+        applyShortcut()
         refreshIcons()
         checkForUpdate()
     }
@@ -203,13 +208,33 @@ enum LaunchEnvironment {
         let event = NSApp.currentEvent
         if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
             showMenu()
-        } else if popover.isShown {
+        } else {
+            togglePopover()
+        }
+    }
+
+    /// A left click, or the Open Usagi shortcut.
+    private func togglePopover() {
+        if popover.isShown {
             popover.performClose(nil)
         } else {
             showPopover()
             refreshIcons()
             checkForUpdate()
         }
+    }
+
+    private func applyShortcut() {
+        let shortcut = preferences.shortcut
+        guard shortcut != registeredShortcut else { return }
+        registeredShortcut = shortcut
+        shortcutFailed = !hotKey.register(shortcut) { [weak self] in self?.togglePopover() }
+    }
+
+    /// While Settings records a new shortcut, the old one is off, so pressing it doesn't open the menu.
+    private func pauseShortcut(_ paused: Bool) {
+        registeredShortcut = nil
+        if paused { hotKey.unregister() } else { applyShortcut() }
     }
 
     /// The page's full height, fitted to the space below the menu bar on the screen the status item is on
@@ -252,6 +277,7 @@ enum LaunchEnvironment {
 
     private func preferencesChanged() {
         controller.hiddenInterval = preferences.refreshInterval
+        applyShortcut()
         updateStatus()
     }
 

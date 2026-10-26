@@ -91,6 +91,12 @@ import Foundation
         set { store(newValue == Cadence.hidden ? nil : Int(newValue), Cadence.intervalKey) }
     }
 
+    /// The "Open Usagi" keyboard shortcut, or nil.
+    var shortcut: Shortcut? {
+        get { defaults.data(forKey: Shortcut.storeKey).flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) } }
+        set { store(newValue.flatMap { try? JSONEncoder().encode($0) }, Shortcut.storeKey) }
+    }
+
     // MARK: Notifications
 
     /// The two "Warn when a limit passes" values; 0 is Off.

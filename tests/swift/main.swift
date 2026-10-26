@@ -266,6 +266,19 @@ equal(LimitAlerts.text(.usedUp, key: "codex|account-2|7d").title, "Codex Weekly 
 equal(LimitAlerts.text(.reset, key: "codex|default|30d").title, "Codex 30-day limit reset", "reset title")
 equal(LimitAlerts.text(.reset, key: "codex|default|30d").body, "This limit is available again.", "reset body")
 
+// Keyboard shortcut
+let cmdOptU = Shortcut(keyCode: 32, modifiers: Shortcut.command | Shortcut.option, key: "U")
+equal(cmdOptU.display, "⌥⌘U", "display order")
+equal(Shortcut(keyCode: 96, modifiers: Shortcut.control | Shortcut.option | Shortcut.shift | Shortcut.command, key: "F5").display,
+      "⌃⌥⇧⌘F5", "all four in the usual order")
+check(cmdOptU.isAllowed, "⌥⌘ allowed")
+check(Shortcut(keyCode: 32, modifiers: Shortcut.control, key: "U").isAllowed, "⌃ alone allowed")
+check(!Shortcut(keyCode: 32, modifiers: Shortcut.shift, key: "U").isAllowed, "shift alone refused")
+check(!Shortcut(keyCode: 32, modifiers: 0, key: "U").isAllowed, "no modifier refused")
+equal(Shortcut(keyCode: 32, modifiers: Shortcut.control | Shortcut.shift | Shortcut.command, key: "U").carbonModifiers, 0x1300, "carbon bits")
+equal(Shortcut(keyCode: 32, modifiers: Shortcut.option, key: "U").carbonModifiers, 0x800, "carbon option")
+equal(try? JSONDecoder().decode(Shortcut.self, from: JSONEncoder().encode(cmdOptU)), cmdOptU, "stored as JSON")
+
 // Logo paths
 typealias Step = SVGPath.Step
 equal(SVGPath.steps("M1 2L3 4H5V6C1 2 3 4 5 6Z"),
