@@ -6,7 +6,12 @@ All notable changes to Usagi. Each `## X.Y.Z` section is used as the release not
 
 ### Added
 
-- **Settings…** in the right-click menu. Each service has a **Color** for its logo and percentage in the menu bar (a hex field and a color well, with its default and **Reset**) and a **Show in menu bar** switch. A color too faint against a light or dark menu bar is drawn in black or white there, and Settings says so.
+- **Settings…** (⌘,) in the right-click menu opens a Settings window with a sidebar: General, Menu Bar, Notifications, About, and a page per service.
+- Per service: a **Color** for its logo and percentage in the menu bar (a hex field and a color well, with its default and **Reset**), **Show in menu bar**, and **Limit shown**: the higher of the 5-hour and weekly limits as before, or any one limit, such as a model's weekly limit. A color too faint against a light or dark menu bar is drawn in black or white there, and Settings says so.
+- Menu Bar: percentages as **Used** or **Remaining**, three text sizes, and the logos on or off, with a preview.
+- General: **Start at login**, the refresh interval while the menu is closed (1, 2, 5 or 15 minutes), and an **Open Usagi** keyboard shortcut.
+- Notifications when a limit passes two levels you pick (80% and 95% at first), is used up, or resets. Usagi asks for permission when the first alert is due, and limits it sees for the first time (after this update or an account switch) don't alert.
+- About: version, update check, links and acknowledgements.
 
 ### Changed
 

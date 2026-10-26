@@ -15,9 +15,15 @@ Needs macOS 14 or later and the Claude Code or Codex CLI ([requirements](#requir
 
 <img src="docs/demo.gif" width="380" alt="Usagi menu: Claude and Codex cards with 5-hour, weekly and model limits, a free-reset and a credit line, flipping to a second Codex account, then dragging the Codex card above Claude while the cards slide into place">
 
-- Your usage percentages appear in the menu bar, each after its service's logo: one per service (Claude, Codex), for the account marked **Active** (or the service's first card when that account is hidden). With no service to show, a rabbit icon appears instead. Click it to open the account cards; right-click it for **Refresh Now**, **Check for Updates**, **Also Use in Apps**, **Settings…** and **Quit Usagi**.
-- **Settings…** has a section per service: **Show in menu bar** turns the service on or off there, and **Color** sets the color of its logo and percentage, with a hex field (`#RRGGBB`) and a color well. **Reset** puts back the default shown next to it. A color too faint against a light or dark menu bar is drawn in black or white there, and Settings says so. While a menu is open, the numbers are out of date, or **Increase contrast** is on in System Settings, the menu bar shows no colors.
-- To start Usagi when you log in, add it under **System Settings > General > Login Items**.
+- Your usage percentages appear in the menu bar, each after its service's logo: one per service (Claude, Codex), for the account marked **Active** (or the service's first card when that account is hidden). With no service to show, a rabbit icon appears instead. Click it to open the account cards; right-click it for **Refresh Now**, **Check for Updates**, **Also Use in Apps**, **Settings…** (⌘,) and **Quit Usagi**.
+- **Settings…** opens a window with a sidebar:
+  - **General**: **Start at login**, **Also Use in Apps**, how often Usagi refreshes while the menu is closed (1, 2, 5 or 15 minutes), and an **Open Usagi** keyboard shortcut that opens the account cards from any app (it needs ⌘, ⌥ or ⌃).
+  - **Menu Bar**: a preview, percentages as **Used** or **Remaining**, text size, and whether the logos show.
+  - **Notifications**: alerts when a limit passes two levels you pick (80% and 95% at first), when it is used up and when it resets. Usagi watches the account each service shows in the menu bar, asks macOS for permission when the first alert is due, and only alerts on changes it sees while running, so updating or switching accounts doesn't set off a burst. Claude's numbers change only when Claude Code updates them, so an alert can come hours late.
+  - **About**: the version, the update check, links and acknowledgements.
+  - A page per service (**Claude**, **Codex**): **Show in menu bar**, a **Color** for its logo and percentage (a hex field such as `#CC7C5E` and a color well; **Reset** puts back the default shown next to it), **Limit shown** (the higher of the 5-hour and weekly limits, or any one limit the account reports, such as a model's weekly limit; one that isn't reported shows a dash), and its accounts and when it was last updated.
+  - A color too faint against a light or dark menu bar is drawn in black or white there, and Settings says so. While a menu is open, the numbers are out of date, or **Increase contrast** is on in System Settings, the menu bar shows no colors.
+- To start Usagi when you log in, turn on **Start at login** in **Settings > General** (or add it under **System Settings > General > Login Items**).
 - Usagi is not signed or notarized by Apple. So that it opens right away, the Homebrew install removes the macOS quarantine flag. That skips Apple's check, so install it only if you trust this repository. From 1.0.3 on, every release zip is built by GitHub Actions and can be checked with `gh attestation verify` ([SECURITY.md](SECURITY.md)).
 
 ## Update and uninstall
@@ -64,7 +70,7 @@ Apps opened from Finder or at login get a short `PATH`, so Usagi looks for the C
 - Each limit shows when its reading was taken (**Updated 4m ago**) and when the limit resets. A reading that may be out of date says so, and a limit that has reset since the last reading shows **Reset** until the CLI reports a new value.
 - Drag a service's card by its header to change the order, or press ⌥↑ / ⌥↓ inside it. The menu bar uses the same order.
 - The menu grows to fit your cards and only scrolls when they are taller than the screen.
-- Usagi refreshes every minute while the menu is open and every 5 minutes while it is closed, and pauses while the display sleeps. When the numbers in the menu bar are not up to date they are dimmed; hover over them to see why. Only one copy of Usagi runs at a time.
+- Usagi refreshes every minute while the menu is open and every 5 minutes (or what you set in Settings) while it is closed, and pauses while the display sleeps. When the numbers in the menu bar are not up to date they are dimmed; hover over them to see why. Only one copy of Usagi runs at a time.
 
 ## What Usagi reads
 
